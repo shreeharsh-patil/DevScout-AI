@@ -27,6 +27,16 @@ class ReporterAgent:
             md_content += f"**Opportunities:** {', '.join(swot.get('opportunities', []))}\n"
             md_content += f"**Threats:** {', '.join(swot.get('threats', []))}\n"
             
+        elif report_type == "email":
+            md_content += f"### Email Footprint Analysis\n**Target:** {analysis.get('email', 'Unknown')}\n\n"
+            md_content += f"**Status:** {'Footprint Found' if analysis.get('footprint_found') else 'No Major Footprint Detected'}\n\n"
+            md_content += f"### Summary\n{analysis.get('summary', '')}\n\n"
+            accounts = analysis.get('github_accounts', [])
+            if accounts:
+                md_content += "### Associated Public Developer Profiles\n"
+                for acc in accounts:
+                    md_content += f"- GitHub: [{acc}](https://github.com/{acc})\n"
+            
         else:
             md_content += "Report generation for this type is not yet implemented.\n"
             md_content += str(analysis)

@@ -33,6 +33,12 @@ class AgentOrchestrator:
                 raw_data = {"website_text": self.researcher.fetch_web_page(query)}
                 analysis = self.analyzer.analyze_startup(raw_data["website_text"])
                 report = self.reporter.generate_markdown_report(analysis, research_type)
+                
+            elif research_type == "email":
+                # Assuming query is an email address
+                raw_data = self.researcher.search_email_osint(query)
+                analysis = self.analyzer.analyze_email(raw_data)
+                report = self.reporter.generate_markdown_report(analysis, research_type)
             
             else:
                 raise ValueError(f"Unsupported research type: {research_type}")

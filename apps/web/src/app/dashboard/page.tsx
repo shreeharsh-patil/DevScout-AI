@@ -60,6 +60,7 @@ export default function DashboardPage() {
                 <SelectContent className="bg-neutral-900 border-neutral-800 text-white">
                   <SelectItem value="developer">Developer Intel (GitHub)</SelectItem>
                   <SelectItem value="startup">Startup Research (Web)</SelectItem>
+                  <SelectItem value="email">Email OSINT (Footprint Check)</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -68,7 +69,7 @@ export default function DashboardPage() {
               <Label htmlFor="query">Target</Label>
               <Input 
                 id="query" 
-                placeholder={type === "developer" ? "GitHub Handle (e.g., torvalds)" : "Company URL (e.g., stripe.com)"} 
+                placeholder={type === "developer" ? "GitHub Handle (e.g., torvalds)" : type === "startup" ? "Company URL (e.g., stripe.com)" : "Email Address (e.g., user@gmail.com)"} 
                 className="bg-neutral-950 border-neutral-800"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
