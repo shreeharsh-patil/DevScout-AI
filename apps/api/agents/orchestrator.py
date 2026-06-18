@@ -4,6 +4,12 @@ from .researcher import ResearcherAgent
 from .analyzer import AnalyzerAgent
 from .reporter import ReporterAgent
 
+_RATE_LIMITED_RESPONSE = {
+    "status": "rate_limited",
+    "error": "Gemini free tier rate limit hit. Wait 60 seconds and retry."
+}
+
+
 class AgentOrchestrator:
     """
     Coordinates the multi-agent system to run research jobs.
@@ -60,6 +66,18 @@ class AgentOrchestrator:
                 raw_data = self.researcher.search_social_tracker(query)
                 analysis = self.analyzer.analyze_social_tracker(raw_data)
                 report = self.reporter.generate_markdown_report(analysis, research_type)
+
+            elif research_type == "linkedin":
+                # query is a LinkedIn profile URL
+                raw_data = {"profile_text": self.researcher.fetch_linkedin_profile(query)}
+                analysis = self.analyzer.analyze_linkedin(raw_data["profile_text"])
+                report = self.reporter.generate_markdown_report(analysis, research_type)
+
+            elif research_type == "npm":
+                # query is a package name
+                raw_data = self.researcher.fetch_npm_package(query)
+                analysis = self.analyzer.analyze_npm(raw_data)
+                report = self.reporter.generate_markdown_report(analysis, research_type)
             
             else:
                 raise ValueError(f"Unsupported research type: {research_type}")
@@ -71,6 +89,13 @@ class AgentOrchestrator:
                 "raw_data": raw_data,
                 "analysis": analysis
             }
+
+        except RuntimeError as e:
+            if str(e) == "RATE_LIMITED":
+                logger.warning("Pipeline caught RATE_LIMITED signal from analyzer.")
+                return _RATE_LIMITED_RESPONSE
+            logger.error(f"Pipeline RuntimeError: {e}")
+            return {"status": "failed", "error": str(e)}
 
         except Exception as e:
             logger.error(f"Pipeline failed: {e}")

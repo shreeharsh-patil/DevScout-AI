@@ -1,6 +1,7 @@
 from typing import Dict
 from loguru import logger
 
+
 class ReporterAgent:
     """
     Synthesizes the analyzed data into a final, shareable report.
@@ -13,7 +14,7 @@ class ReporterAgent:
         if report_type == "developer":
             md_content += f"## Developer Score: {analysis.get('score', 'N/A')}/100\n\n"
             md_content += f"### Summary\n{analysis.get('summary', '')}\n\n"
-            md_content += f"### Tech Stack\n"
+            md_content += "### Tech Stack\n"
             for tech in analysis.get('tech_stack', []):
                 md_content += f"- {tech}\n"
             md_content += f"\n### Deep Insights\n{analysis.get('raw_insights', '')}\n"
@@ -26,6 +27,10 @@ class ReporterAgent:
             md_content += f"**Weaknesses:** {', '.join(swot.get('weaknesses', []))}\n"
             md_content += f"**Opportunities:** {', '.join(swot.get('opportunities', []))}\n"
             md_content += f"**Threats:** {', '.join(swot.get('threats', []))}\n"
+            tech_hints = analysis.get("tech_hints", [])
+            if tech_hints:
+                md_content += f"\n### Detected Tech Stack\n"
+                md_content += ", ".join(f"`{t}`" for t in tech_hints) + "\n"
             
         elif report_type == "email":
             md_content += f"### Email Footprint Analysis\n**Target:** {analysis.get('email', 'Unknown')}\n\n"
@@ -79,8 +84,29 @@ class ReporterAgent:
         elif report_type == "social":
             md_content += f"### Global Sentiment: {analysis.get('global_sentiment', 'Unknown')}\n\n"
             md_content += f"### Overall Summary\n{analysis.get('overall_summary', '')}\n\n"
-            md_content += f"#### Western Perspective (Twitter/Reddit/GitHub)\n{analysis.get('western_perspective', '')}\n\n"
+            md_content += f"#### Western Perspective (Twitter/Reddit/GitHub/HN)\n{analysis.get('western_perspective', '')}\n\n"
             md_content += f"#### Eastern Perspective (Bilibili)\n{analysis.get('eastern_perspective', '')}\n"
+
+        elif report_type == "linkedin":
+            md_content += f"### Professional Summary\n{analysis.get('summary', '')}\n\n"
+            md_content += f"**Experience Level:** {analysis.get('experience_level', 'Unknown')}\n\n"
+            skills = analysis.get("skills", [])
+            if skills:
+                md_content += "### Skills\n"
+                md_content += ", ".join(f"`{s}`" for s in skills) + "\n\n"
+            highlights = analysis.get("key_highlights", [])
+            if highlights:
+                md_content += "### Key Highlights\n"
+                for h in highlights:
+                    md_content += f"- {h}\n"
+
+        elif report_type == "npm":
+            md_content += f"## Package: `{analysis.get('summary', '').split(':')[0] if 'summary' in analysis else 'Unknown'}`\n\n"
+            md_content += f"**Health Score:** {analysis.get('health_score', 'N/A')}/100\n\n"
+            md_content += f"**Popularity:** {analysis.get('popularity', 'Unknown')}  |  "
+            md_content += f"**Maintenance:** {analysis.get('maintenance_status', 'Unknown')}\n\n"
+            md_content += f"### Summary\n{analysis.get('summary', '')}\n\n"
+            md_content += f"### Recommendation\n{analysis.get('recommendation', '')}\n"
             
         else:
             md_content += "Report generation for this type is not yet implemented.\n"
