@@ -36,6 +36,20 @@ class ReporterAgent:
                 md_content += "### Associated Public Developer Profiles\n"
                 for acc in accounts:
                     md_content += f"- GitHub: [{acc}](https://github.com/{acc})\n"
+                    
+        elif report_type == "youtube":
+            if analysis.get("status") == "error":
+                md_content += f"### Error\n{analysis.get('summary', 'Unknown error occurred.')}\n"
+            else:
+                md_content += f"### Video: {analysis.get('title', 'Unknown')}\n"
+                md_content += f"**Channel:** {analysis.get('channel', 'Unknown')}  |  **Views:** {analysis.get('metrics', {}).get('views', 0):,}\n\n"
+                md_content += f"### Summary\n{analysis.get('summary', '')}\n\n"
+                md_content += f"### Target Audience\n{analysis.get('target_audience', 'Unknown')}\n\n"
+                
+                tags = analysis.get('tags', [])
+                if tags:
+                    md_content += "### Key Tags\n"
+                    md_content += ", ".join(tags) + "\n"
             
         else:
             md_content += "Report generation for this type is not yet implemented.\n"

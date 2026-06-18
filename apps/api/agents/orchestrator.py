@@ -39,6 +39,12 @@ class AgentOrchestrator:
                 raw_data = self.researcher.search_email_osint(query)
                 analysis = self.analyzer.analyze_email(raw_data)
                 report = self.reporter.generate_markdown_report(analysis, research_type)
+                
+            elif research_type == "youtube":
+                # Assuming query is a YouTube URL
+                raw_data = self.researcher.fetch_youtube_info(query)
+                analysis = self.analyzer.analyze_youtube(raw_data)
+                report = self.reporter.generate_markdown_report(analysis, research_type)
             
             else:
                 raise ValueError(f"Unsupported research type: {research_type}")

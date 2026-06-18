@@ -196,3 +196,67 @@ class AnalyzerAgent:
             "github_accounts": [acc.get("login") for acc in gh_accounts],
             "summary": summary
         }
+
+    def analyze_youtube(self, yt_data: Dict) -> Dict:
+        logger.info("Analyzing YouTube video data...")
+        
+        # 1. Real Data Extraction
+        title = yt_data.get("title", "Unknown Title")
+        channel = yt_data.get("uploader", "Unknown Channel")
+        views = yt_data.get("view_count", 0)
+        likes = yt_data.get("like_count", 0)
+        description = yt_data.get("description", "No description provided.")
+        tags = yt_data.get("tags", [])
+        
+        if not title or title == "Unknown Title":
+            return {
+                "status": "error",
+                "summary": "Failed to extract video information. The video might be private, age-restricted, or invalid."
+            }
+
+        desc_snippet = description[:2000] # Limit for LLM context
+
+        if self.use_llm:
+            logger.info("Using Gemini LLM for deep YouTube Analysis")
+            prompt = f"""
+            Analyze the following YouTube video metadata.
+            Title: {title}
+            Channel: {channel}
+            Views: {views}
+            Tags: {', '.join(tags[:10])}
+            Description:
+            {desc_snippet}
+            
+            Return ONLY a valid JSON object with the following structure:
+            {{
+                "summary": "A 2-3 sentence summary of what this video is likely about based on the title and description.",
+                "target_audience": "Who is this video for? (e.g., Beginners, Software Engineers, Gamers)"
+            }}
+            """
+            try:
+                response = self.model.generate_content(prompt)
+                res_text = response.text.replace('```json', '').replace('```', '').strip()
+                llm_data = json.loads(res_text)
+                
+                return {
+                    "status": "success",
+                    "title": title,
+                    "channel": channel,
+                    "metrics": {"views": views, "likes": likes},
+                    "tags": tags[:10],
+                    "summary": llm_data.get("summary", "Could not generate summary."),
+                    "target_audience": llm_data.get("target_audience", "Unknown")
+                }
+            except Exception as e:
+                logger.error(f"LLM parsing failed for youtube analysis: {e}")
+
+        # Fallback without LLM
+        return {
+            "status": "success",
+            "title": title,
+            "channel": channel,
+            "metrics": {"views": views, "likes": likes},
+            "tags": tags[:10],
+            "summary": f"Video titled '{title}' by {channel}. Description snippet: {description[:150]}...",
+            "target_audience": "Requires LLM API Key to determine."
+        }
