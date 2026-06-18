@@ -260,3 +260,121 @@ class AnalyzerAgent:
             "summary": f"Video titled '{title}' by {channel}. Description snippet: {description[:150]}...",
             "target_audience": "Requires LLM API Key to determine."
         }
+
+    def analyze_reddit(self, reddit_data: Dict) -> Dict:
+        logger.info("Analyzing Reddit OSINT data...")
+        raw_text = reddit_data.get("raw_output", "")
+        
+        if not raw_text or len(raw_text.strip()) < 10:
+            return {"status": "error", "summary": "Failed to extract sufficient Reddit data."}
+            
+        text_snippet = raw_text[:3000]
+
+        if self.use_llm:
+            logger.info("Using Gemini LLM for Reddit Analysis")
+            prompt = f"""
+            Analyze the following search results from Reddit regarding a specific topic.
+            Identify user sentiment, common pain points, and potential feature requests.
+            
+            Reddit Search Results:
+            {text_snippet}
+            
+            Return ONLY a valid JSON object with the following structure:
+            {{
+                "sentiment": "Positive/Neutral/Negative",
+                "pain_points": ["point 1", "point 2"],
+                "feature_requests": ["idea 1", "idea 2"],
+                "summary": "2-3 sentence overview of the community discussion."
+            }}
+            """
+            try:
+                response = self.model.generate_content(prompt)
+                res_text = response.text.replace('```json', '').replace('```', '').strip()
+                return json.loads(res_text)
+            except Exception as e:
+                logger.error(f"LLM parsing failed for Reddit analysis: {e}")
+
+        return {
+            "sentiment": "Unknown (Needs LLM)",
+            "pain_points": ["Raw data extracted successfully but requires LLM API key for processing"],
+            "feature_requests": ["Add GEMINI_API_KEY to see actual insights"],
+            "summary": f"Raw Output Snippet: {text_snippet[:200]}..."
+        }
+
+    def analyze_idea(self, idea_data: Dict) -> Dict:
+        logger.info("Analyzing SaaS Idea Validation data...")
+        raw_text = idea_data.get("raw_output", "")
+        
+        if not raw_text or len(raw_text.strip()) < 10:
+            return {"status": "error", "summary": "Failed to extract market validation data."}
+            
+        text_snippet = raw_text[:3000]
+
+        if self.use_llm:
+            logger.info("Using Gemini LLM for Idea Validation")
+            prompt = f"""
+            Analyze the following web search results regarding a SaaS product idea.
+            Identify market demand, potential competitors, and an overall viability score (1-100).
+            
+            Search Results:
+            {text_snippet}
+            
+            Return ONLY a valid JSON object with the following structure:
+            {{
+                "viability_score": 80,
+                "competitors": ["comp 1", "comp 2"],
+                "market_demand": "High/Medium/Low",
+                "summary": "2-3 sentence overview of the market viability."
+            }}
+            """
+            try:
+                response = self.model.generate_content(prompt)
+                res_text = response.text.replace('```json', '').replace('```', '').strip()
+                return json.loads(res_text)
+            except Exception as e:
+                logger.error(f"LLM parsing failed for Idea analysis: {e}")
+
+        return {
+            "viability_score": 0,
+            "competitors": ["Needs LLM API Key to determine"],
+            "market_demand": "Unknown",
+            "summary": f"Raw Output Snippet: {text_snippet[:200]}..."
+        }
+
+    def analyze_social_tracker(self, tracker_data: Dict) -> Dict:
+        logger.info("Analyzing cross-platform social tracking data...")
+        keyword = tracker_data.get("keyword", "Unknown")
+        
+        if self.use_llm:
+            logger.info("Using Gemini LLM for Social Tracking Analysis")
+            prompt = f"""
+            Analyze the following cross-platform social tracking data for the keyword: "{keyword}".
+            You are comparing Western platforms (Twitter, Reddit, GitHub) against Eastern platforms (Bilibili) if data is available.
+            
+            Twitter Data: {tracker_data.get('twitter')}
+            Reddit Data: {tracker_data.get('reddit')}
+            GitHub Data: {tracker_data.get('github')}
+            Bilibili Data: {tracker_data.get('bilibili')}
+            
+            Return ONLY a valid JSON object with the following structure:
+            {{
+                "global_sentiment": "Positive/Neutral/Negative",
+                "western_perspective": "1-2 sentence summary of what Twitter/Reddit/GitHub users are saying.",
+                "eastern_perspective": "1-2 sentence summary of what Bilibili users are saying (or 'No data available').",
+                "overall_summary": "A brief conclusion on the global mindshare of this keyword."
+            }}
+            """
+            try:
+                response = self.model.generate_content(prompt)
+                res_text = response.text.replace('```json', '').replace('```', '').strip()
+                return json.loads(res_text)
+            except Exception as e:
+                logger.error(f"LLM parsing failed for social tracking analysis: {e}")
+
+        # Fallback without LLM
+        return {
+            "global_sentiment": "Needs LLM",
+            "western_perspective": f"Raw Data Snippet: {tracker_data.get('reddit', '')[:100]}...",
+            "eastern_perspective": f"Raw Data Snippet: {tracker_data.get('bilibili', '')[:100]}...",
+            "overall_summary": "Extracted raw data from multiple platforms but requires GEMINI_API_KEY for true synthesis."
+        }

@@ -98,3 +98,60 @@ class ResearcherAgent:
             
         return results
 
+    def search_web_exa(self, query: str, num_results: int = 5) -> dict:
+        """Searches the web using Exa AI via Agent Reach's mcporter integration."""
+        logger.info(f"Searching Exa for: {query}")
+        try:
+            # We use subprocess to call mcporter which has the Exa MCP configured
+            cmd = f"mcporter call 'exa.web_search_exa(query: \"{query}\", numResults: {num_results})'"
+            result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+            return {"raw_output": result.stdout}
+        except Exception as e:
+            logger.error(f"Exa search failed: {e}")
+            return {"raw_output": ""}
+
+    def search_social_tracker(self, keyword: str) -> dict:
+        """Searches multiple platforms (Twitter, Bilibili, GitHub, Reddit) for a keyword."""
+        logger.info(f"Running Cross-Platform Social Tracker for: {keyword}")
+        aggregated_data = {
+            "keyword": keyword,
+            "twitter": "Not configured or failed to fetch.",
+            "bilibili": "Failed to fetch.",
+            "github": "Failed to fetch.",
+            "reddit": "Failed to fetch."
+        }
+        
+        # 1. Twitter (via twitter-cli)
+        try:
+            logger.info("Fetching Twitter data...")
+            tw_result = subprocess.run(["twitter", "search", keyword, "-n", "3"], capture_output=True, text=True, timeout=15)
+            if tw_result.returncode == 0 and tw_result.stdout.strip():
+                aggregated_data["twitter"] = tw_result.stdout[:1500]
+        except Exception as e:
+            logger.warning(f"Twitter search failed (might need cookie config): {e}")
+
+        # 2. Bilibili (via bili-cli)
+        try:
+            logger.info("Fetching Bilibili data...")
+            bili_result = subprocess.run(["bili", "search", keyword, "--type", "video", "-n", "3"], capture_output=True, text=True, timeout=15)
+            if bili_result.returncode == 0 and bili_result.stdout.strip():
+                aggregated_data["bilibili"] = bili_result.stdout[:1500]
+        except Exception as e:
+            logger.warning(f"Bilibili search failed: {e}")
+
+        # 3. GitHub (reusing existing API call)
+        logger.info("Fetching GitHub data...")
+        gh_data = self.search_github_repos(keyword)
+        if gh_data.get("items"):
+            # Extract top 3 repos' descriptions
+            gh_summaries = [f"{repo.get('full_name')} ({repo.get('stargazers_count')} stars): {repo.get('description')}" for repo in gh_data.get("items")[:3]]
+            aggregated_data["github"] = "\n".join(gh_summaries)
+            
+        # 4. Reddit (via Exa)
+        logger.info("Fetching Reddit data...")
+        reddit_data = self.search_web_exa(f"site:reddit.com {keyword}", num_results=3)
+        if reddit_data.get("raw_output"):
+            aggregated_data["reddit"] = reddit_data.get("raw_output")[:1500]
+
+        return aggregated_data
+

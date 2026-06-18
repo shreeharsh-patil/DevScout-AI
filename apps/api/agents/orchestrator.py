@@ -45,6 +45,21 @@ class AgentOrchestrator:
                 raw_data = self.researcher.fetch_youtube_info(query)
                 analysis = self.analyzer.analyze_youtube(raw_data)
                 report = self.reporter.generate_markdown_report(analysis, research_type)
+                
+            elif research_type == "reddit":
+                raw_data = self.researcher.search_web_exa(f"site:reddit.com {query}", num_results=10)
+                analysis = self.analyzer.analyze_reddit(raw_data)
+                report = self.reporter.generate_markdown_report(analysis, research_type)
+                
+            elif research_type == "idea":
+                raw_data = self.researcher.search_web_exa(f"{query} startup competitors market", num_results=10)
+                analysis = self.analyzer.analyze_idea(raw_data)
+                report = self.reporter.generate_markdown_report(analysis, research_type)
+                
+            elif research_type == "social":
+                raw_data = self.researcher.search_social_tracker(query)
+                analysis = self.analyzer.analyze_social_tracker(raw_data)
+                report = self.reporter.generate_markdown_report(analysis, research_type)
             
             else:
                 raise ValueError(f"Unsupported research type: {research_type}")
