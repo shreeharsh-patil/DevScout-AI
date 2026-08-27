@@ -1,9 +1,7 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Zap,
@@ -15,278 +13,109 @@ import {
   RefreshCw,
   FileText,
   Download,
-  GitBranch,
-  Globe,
-  Mail,
-  PlayCircle,
-  MessageSquare,
-  ShieldCheck,
-  TrendingUp,
-  Package,
-  CheckCircle2,
-  XCircle,
-  Clock,
   ChevronRight,
+  Search,
+  BarChart3,
+  Filter,
 } from "lucide-react";
 
-// LinkedIn icon (not in this lucide-react version)
-function LinkedinIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="currentColor" className={className}>
-      <path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6zM2 9h4v12H2z" />
-      <circle cx="4" cy="4" r="2" />
-    </svg>
-  );
-}
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-interface HistoryItem {
-  job_id: string;
-  query: string;
-  type: string;
-  status: "completed" | "failed" | "pending" | "running" | string;
-  created_at: string;
-  completed_at?: string;
-}
+// Shared components
+import MarkdownReport from "@/components/reports/markdown-report";
+import IconForType from "@/components/research/icon-for-type";
 
-interface FullReport {
-  job_id: string;
-  query: string;
-  type: string;
-  status: string;
-  report?: string;
-  error?: string;
-  created_at: string;
-}
+// Shared logic
+import { getHistory, getReport, ApiError } from "@/lib/api";
+import { formatDate, formatRelative, downloadMarkdown } from "@/lib/report-utils";
+import { TYPE_META, STATUS_META, getTypeMetaFallback, getStatusMetaFallback } from "@/lib/type-meta";
+import type { HistoryItem, FullReport } from "@/types/research";
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-const TYPE_META: Record<string, { label: string; icon: React.ReactNode; color: string }> = {
-  developer: {
-    label: "Developer Intel",
-    icon: <GitBranch className="w-3 h-3" />,
-    color: "text-emerald-400 border-emerald-500/30 bg-emerald-500/5",
-  },
-  startup: {
-    label: "Startup Research",
-    icon: <Globe className="w-3 h-3" />,
-    color: "text-indigo-400 border-indigo-500/30 bg-indigo-500/5",
-  },
-  email: {
-    label: "Email OSINT",
-    icon: <Mail className="w-3 h-3" />,
-    color: "text-orange-400 border-orange-500/30 bg-orange-500/5",
-  },
-  youtube: {
-    label: "YouTube Analysis",
-    icon: <PlayCircle className="w-3 h-3" />,
-    color: "text-red-400 border-red-500/30 bg-red-500/5",
-  },
-  reddit: {
-    label: "Reddit Insights",
-    icon: <MessageSquare className="w-3 h-3" />,
-    color: "text-orange-500 border-orange-500/30 bg-orange-500/5",
-  },
-  idea: {
-    label: "Idea Validator",
-    icon: <ShieldCheck className="w-3 h-3" />,
-    color: "text-cyan-400 border-cyan-500/30 bg-cyan-500/5",
-  },
-  social: {
-    label: "Social Tracker",
-    icon: <TrendingUp className="w-3 h-3" />,
-    color: "text-blue-400 border-blue-500/30 bg-blue-500/5",
-  },
-  linkedin: {
-    label: "LinkedIn Intel",
-    icon: <LinkedinIcon className="w-3 h-3" />,
-    color: "text-sky-400 border-sky-500/30 bg-sky-500/5",
-  },
-  npm: {
-    label: "npm Analyzer",
-    icon: <Package className="w-3 h-3" />,
-    color: "text-rose-400 border-rose-500/30 bg-rose-500/5",
-  },
-};
+// ─── Stats Banner ─────────────────────────────────────────────────────────────
+function StatsBanner({ history }: { history: HistoryItem[] }) {
+  const total = history.length;
+  const completed = history.filter((h) => h.status === "completed").length;
+  const failed = history.filter((h) => h.status === "failed").length;
+  const successRate = total > 0 ? Math.round((completed / total) * 100) : 0;
 
-const STATUS_META: Record<string, { label: string; icon: React.ReactNode; color: string }> = {
-  completed: {
-    label: "Completed",
-    icon: <CheckCircle2 className="w-3 h-3" />,
-    color: "text-emerald-400 border-emerald-500/30 bg-emerald-500/5",
-  },
-  failed: {
-    label: "Failed",
-    icon: <XCircle className="w-3 h-3" />,
-    color: "text-red-400 border-red-500/30 bg-red-500/5",
-  },
-  pending: {
-    label: "Pending",
-    icon: <Clock className="w-3 h-3" />,
-    color: "text-amber-400 border-amber-500/30 bg-amber-500/5",
-  },
-  running: {
-    label: "Running",
-    icon: <Loader2 className="w-3 h-3 animate-spin" />,
-    color: "text-indigo-400 border-indigo-500/30 bg-indigo-500/5",
-  },
-};
+  const typeCounts: Record<string, number> = {};
+  history.forEach((h) => {
+    typeCounts[h.research_type] = (typeCounts[h.research_type] || 0) + 1;
+  });
+  const topType = Object.entries(typeCounts).sort((a, b) => b[1] - a[1])[0]?.[0];
+  const topTypeMeta = topType ? TYPE_META[topType] : null;
 
-function formatDate(iso: string): string {
-  try {
-    const d = new Date(iso);
-    return d.toLocaleString("en-US", {
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  } catch {
-    return iso;
-  }
-}
+  const stats = [
+    { label: "Total Scans", value: total, icon: <BarChart3 className="w-4 h-4 text-indigo-400" /> },
+    { label: "Completed", value: completed, icon: <svg className="w-4 h-4 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" /></svg> },
+    { label: "Failed", value: failed, icon: <svg className="w-4 h-4 text-red-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" /><line x1="15" y1="9" x2="9" y2="15" /><line x1="9" y1="9" x2="15" y2="15" /></svg> },
+    { label: "Success Rate", value: `${successRate}%`, icon: <svg className="w-4 h-4 text-cyan-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18" /><polyline points="17 6 23 6 23 12" /></svg> },
+  ];
 
-function downloadMarkdown(content: string, type: string) {
-  const blob = new Blob([content], { type: "text/markdown;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `devscout-report-${type}.md`;
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
-// ─── Markdown renderer (same as main page) ────────────────────────────────────
-function MarkdownReport({ content }: { content: string }) {
   return (
-    <ReactMarkdown
-      remarkPlugins={[remarkGfm]}
-      components={{
-        h1: ({ children }) => (
-          <h1 className="text-2xl font-bold text-white mb-6 border-b border-neutral-800 pb-2">
-            {children}
-          </h1>
-        ),
-        h2: ({ children }) => (
-          <h2 className="text-xl font-semibold text-indigo-400 mt-8 mb-4">{children}</h2>
-        ),
-        h3: ({ children }) => (
-          <h3 className="text-lg font-medium text-emerald-400 mt-6 mb-2">{children}</h3>
-        ),
-        h4: ({ children }) => (
-          <h4 className="text-base font-medium text-neutral-300 mt-4 mb-2">{children}</h4>
-        ),
-        p: ({ children }) => (
-          <p className="text-neutral-300 mb-3 leading-relaxed">{children}</p>
-        ),
-        ul: ({ children }) => <ul className="mb-4 space-y-1 ml-2">{children}</ul>,
-        ol: ({ children }) => (
-          <ol className="mb-4 space-y-1 ml-4 list-decimal">{children}</ol>
-        ),
-        li: ({ children }) => (
-          <li className="flex gap-2 text-neutral-300">
-            <span className="text-indigo-400 shrink-0 mt-0.5">•</span>
-            <span>{children}</span>
-          </li>
-        ),
-        strong: ({ children }) => (
-          <strong className="text-white font-semibold">{children}</strong>
-        ),
-        em: ({ children }) => <em className="text-neutral-400 italic">{children}</em>,
-        a: ({ href, children }) => (
-          <a
-            href={href}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-indigo-400 hover:underline"
-          >
-            {children}
-          </a>
-        ),
-        blockquote: ({ children }) => (
-          <blockquote className="border-l-2 border-indigo-500 pl-4 my-4 text-neutral-400 italic">
-            {children}
-          </blockquote>
-        ),
-        table: ({ children }) => (
-          <div className="overflow-x-auto my-6">
-            <table className="w-full text-sm border-collapse">{children}</table>
-          </div>
-        ),
-        thead: ({ children }) => (
-          <thead className="bg-neutral-900 text-neutral-400 text-xs uppercase">{children}</thead>
-        ),
-        tbody: ({ children }) => (
-          <tbody className="divide-y divide-neutral-800">{children}</tbody>
-        ),
-        tr: ({ children }) => <tr className="hover:bg-neutral-900/50">{children}</tr>,
-        th: ({ children }) => (
-          <th className="px-4 py-2 text-left font-medium text-neutral-400">{children}</th>
-        ),
-        td: ({ children }) => <td className="px-4 py-3 text-neutral-300">{children}</td>,
-        code: ({ className, children, ...props }) => {
-          const isBlock = className?.includes("language-");
-          return isBlock ? (
-            <code
-              className="block bg-neutral-900 border border-neutral-800 rounded-lg p-4 text-sm font-mono text-emerald-300 overflow-x-auto my-4"
-              {...props}
-            >
-              {children}
-            </code>
-          ) : (
-            <code
-              className="bg-neutral-900 text-emerald-300 px-1.5 py-0.5 rounded text-xs font-mono"
-              {...props}
-            >
-              {children}
-            </code>
-          );
-        },
-        pre: ({ children }) => <pre className="not-prose">{children}</pre>,
-        hr: () => <hr className="border-neutral-800 my-6" />,
-      }}
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: 0.1 }}
+      className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8"
     >
-      {content}
-    </ReactMarkdown>
+      {stats.map((s) => (
+        <div
+          key={s.label}
+          className="bg-neutral-900/40 border border-neutral-800 rounded-xl p-4 flex items-center gap-3"
+        >
+          <div className="w-8 h-8 rounded-lg bg-neutral-800 flex items-center justify-center shrink-0">
+            {s.icon}
+          </div>
+          <div>
+            <p className="text-xl font-bold text-white">{s.value}</p>
+            <p className="text-[10px] uppercase tracking-wider text-neutral-600">{s.label}</p>
+          </div>
+        </div>
+      ))}
+      {topTypeMeta && (
+        <div className="col-span-2 md:col-span-4 bg-neutral-900/20 border border-neutral-800 rounded-xl px-4 py-3 flex items-center gap-3">
+          <span className="text-[10px] uppercase tracking-wider text-neutral-600">Most used module:</span>
+          <Badge variant="outline" className={`text-xs gap-1.5 ${topTypeMeta.color}`}>
+            {topTypeMeta.icon}
+            {topTypeMeta.label}
+          </Badge>
+          <span className="text-xs text-neutral-600">
+            — {typeCounts[topType!]} scan{typeCounts[topType!] !== 1 ? "s" : ""}
+          </span>
+        </div>
+      )}
+    </motion.div>
   );
 }
 
 // ─── Report Modal / Slide-over ────────────────────────────────────────────────
-function ReportModal({
-  item,
-  onClose,
-}: {
-  item: HistoryItem;
-  onClose: () => void;
-}) {
+function ReportModal({ item, onClose }: { item: HistoryItem; onClose: () => void }) {
   const [fullReport, setFullReport] = useState<FullReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    const fetchReport = async () => {
-      setLoading(true);
-      setError("");
-      try {
-        const res = await fetch(
-          `http://localhost:8000/api/v1/research/status/${item.job_id}`
-        );
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-        setFullReport(data);
-      } catch (e: any) {
-        setError(e.message || "Failed to load report.");
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchReport();
+    let cancelled = false;
+    getReport(item.job_id)
+      .then((data) => {
+        if (!cancelled) {
+          setFullReport(data as FullReport);
+          setLoading(false);
+        }
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) {
+          const msg = e instanceof ApiError ? e.message : "Failed to load report.";
+          setError(msg);
+          setLoading(false);
+        }
+      });
+    return () => { cancelled = true; };
   }, [item.job_id]);
 
-  // Close on Escape
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -295,11 +124,8 @@ function ReportModal({
     return () => document.removeEventListener("keydown", handler);
   }, [onClose]);
 
-  const typeMeta = TYPE_META[item.type] ?? {
-    label: item.type,
-    icon: <FileText className="w-3 h-3" />,
-    color: "text-neutral-400 border-neutral-700 bg-neutral-800/30",
-  };
+  const typeMeta = TYPE_META[item.research_type] ?? getTypeMetaFallback(item.research_type);
+  const reportContent = fullReport?.report_markdown || fullReport?.report;
 
   return (
     <AnimatePresence>
@@ -332,9 +158,9 @@ function ReportModal({
               {typeMeta.icon}
               {typeMeta.label}
             </Badge>
-            {fullReport?.report && (
+            {reportContent && (
               <button
-                onClick={() => downloadMarkdown(fullReport.report!, item.type)}
+                onClick={() => downloadMarkdown(reportContent, item.research_type)}
                 className="flex items-center gap-1 text-[10px] text-neutral-500 hover:text-white border border-neutral-700 hover:border-neutral-500 rounded px-2 py-1 transition-all"
                 title="Download"
               >
@@ -360,10 +186,7 @@ function ReportModal({
             </div>
           )}
           {!loading && error && (
-            <Alert
-              variant="destructive"
-              className="bg-red-950/30 border-red-900 text-red-400"
-            >
+            <Alert variant="destructive" className="bg-red-950/30 border-red-900 text-red-400">
               <AlertCircle className="w-4 h-4" />
               <AlertTitle>Failed to load</AlertTitle>
               <AlertDescription>{error}</AlertDescription>
@@ -371,8 +194,8 @@ function ReportModal({
           )}
           {!loading && fullReport && (
             <>
-              {fullReport.report ? (
-                <MarkdownReport content={fullReport.report} />
+              {reportContent ? (
+                <MarkdownReport content={reportContent} />
               ) : (
                 <div className="text-center py-16">
                   <FileText className="w-12 h-12 text-neutral-700 mx-auto mb-4" />
@@ -402,45 +225,67 @@ export default function HistoryPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [selectedItem, setSelectedItem] = useState<HistoryItem | null>(null);
-  const [scrolled, setScrolled] = useState(false);
-
-  useEffect(() => {
-    const handleScroll = () => setScrolled(window.scrollY > 20);
-    window.addEventListener("scroll", handleScroll);
-    return () => window.removeEventListener("scroll", handleScroll);
-  }, []);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [activeTypeFilter, setActiveTypeFilter] = useState<string>("all");
+  const [activeStatusFilter, setActiveStatusFilter] = useState<string>("all");
 
   const fetchHistory = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
-      const res = await fetch("http://localhost:8000/api/v1/history");
-      if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
-      const data = await res.json();
-      // Accept array or { items: [] } shape
-      setHistory(Array.isArray(data) ? data : data.items ?? []);
-    } catch (e: any) {
-      setError(e.message || "Failed to fetch history.");
+      const data = await getHistory();
+      setHistory(Array.isArray(data) ? data : []);
+    } catch (e: unknown) {
+      const msg = e instanceof ApiError ? e.message : "Failed to fetch history.";
+      setError(msg);
     } finally {
       setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    fetchHistory();
-  }, [fetchHistory]);
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      setError("");
+      try {
+        const data = await getHistory();
+        if (!cancelled) setHistory(Array.isArray(data) ? data : []);
+      } catch (e: unknown) {
+        if (!cancelled) {
+          const msg = e instanceof ApiError ? e.message : "Failed to fetch history.";
+          setError(msg);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const uniqueTypes = useMemo(() => {
+    const types = Array.from(new Set(history.map((h) => h.research_type)));
+    return types.sort();
+  }, [history]);
+
+  const filtered = useMemo(() => {
+    return history.filter((item) => {
+      const matchesSearch =
+        !searchQuery ||
+        item.query.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        item.research_type.toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesType = activeTypeFilter === "all" || item.research_type === activeTypeFilter;
+      const matchesStatus = activeStatusFilter === "all" || item.status === activeStatusFilter;
+      return matchesSearch && matchesType && matchesStatus;
+    });
+  }, [history, searchQuery, activeTypeFilter, activeStatusFilter]);
+
+  const hasFilters = searchQuery || activeTypeFilter !== "all" || activeStatusFilter !== "all";
 
   return (
     <div className="flex flex-col min-h-screen bg-[#050505] text-white selection:bg-indigo-500/30">
-
-      {/* Header */}
-      <header
-        className={`fixed top-0 w-full z-40 transition-all duration-300 ${
-          scrolled
-            ? "bg-black/80 backdrop-blur-md border-b border-neutral-800 py-3"
-            : "bg-transparent py-6"
-        }`}
-      >
+      {/* History-specific header */}
+      <header className="fixed top-0 w-full z-40 bg-transparent py-6">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 flex justify-between items-center">
           <Link href="/" className="flex items-center gap-2">
             <div className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-emerald-500 rounded-lg flex items-center justify-center">
@@ -475,7 +320,7 @@ export default function HistoryPage() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.4 }}
-            className="mb-10"
+            className="mb-8"
           >
             <div className="flex items-center justify-between flex-wrap gap-4">
               <div>
@@ -486,7 +331,8 @@ export default function HistoryPage() {
                   <h1 className="text-3xl font-extrabold tracking-tight">Research History</h1>
                 </div>
                 <p className="text-neutral-500 text-sm ml-[52px]">
-                  All past research jobs — click <strong className="text-neutral-400">View</strong> to open the full report.
+                  All past research jobs — click <strong className="text-neutral-400">View</strong> to
+                  open the full report.
                 </p>
               </div>
               <Button
@@ -502,12 +348,110 @@ export default function HistoryPage() {
             </div>
           </motion.div>
 
+          {/* Stats Banner */}
+          {!loading && !error && history.length > 0 && <StatsBanner history={history} />}
+
+          {/* Search + Filters */}
+          {!loading && !error && history.length > 0 && (
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.15 }}
+              className="mb-6 space-y-3"
+            >
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-600" />
+                <input
+                  type="text"
+                  placeholder="Search queries or module types..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full bg-neutral-900/60 border border-neutral-800 rounded-xl pl-10 pr-4 py-2.5 text-sm text-white placeholder:text-neutral-600 outline-none focus:border-neutral-600 transition-colors"
+                />
+                {searchQuery && (
+                  <button
+                    onClick={() => setSearchQuery("")}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-600 hover:text-white"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+
+              <div className="flex flex-wrap gap-2 items-center">
+                <span className="text-[10px] uppercase tracking-wider text-neutral-600 flex items-center gap-1">
+                  <Filter className="w-3 h-3" /> Filter:
+                </span>
+
+                <button
+                  onClick={() => setActiveTypeFilter("all")}
+                  className={`text-xs px-3 py-1 rounded-full border transition-all ${
+                    activeTypeFilter === "all"
+                      ? "border-indigo-500/50 bg-indigo-500/10 text-indigo-300"
+                      : "border-neutral-800 text-neutral-500 hover:border-neutral-600 hover:text-neutral-300"
+                  }`}
+                >
+                  All types
+                </button>
+                {uniqueTypes.map((t) => {
+                  const meta = TYPE_META[t];
+                  return (
+                    <button
+                      key={t}
+                      onClick={() => setActiveTypeFilter(activeTypeFilter === t ? "all" : t)}
+                      className={`text-xs px-3 py-1 rounded-full border transition-all flex items-center gap-1 ${
+                        activeTypeFilter === t
+                          ? meta?.color || "border-neutral-600 bg-neutral-800 text-white"
+                          : "border-neutral-800 text-neutral-500 hover:border-neutral-600 hover:text-neutral-300"
+                      }`}
+                    >
+                      <IconForType type={t} />
+                      {meta?.label || t}
+                    </button>
+                  );
+                })}
+
+                <span className="w-px h-4 bg-neutral-800 mx-1" />
+
+                {(["all", "completed", "failed"] as const).map((s) => (
+                  <button
+                    key={s}
+                    onClick={() => setActiveStatusFilter(s)}
+                    className={`text-xs px-3 py-1 rounded-full border transition-all ${
+                      activeStatusFilter === s
+                        ? s === "all"
+                          ? "border-neutral-600 bg-neutral-800 text-white"
+                          : STATUS_META[s]?.color || "border-neutral-600 bg-neutral-800 text-white"
+                        : "border-neutral-800 text-neutral-500 hover:border-neutral-600 hover:text-neutral-300"
+                    }`}
+                  >
+                    {s === "all" ? "Any status" : s.charAt(0).toUpperCase() + s.slice(1)}
+                  </button>
+                ))}
+              </div>
+
+              <p className="text-[11px] text-neutral-600">
+                Showing <span className="text-neutral-400 font-medium">{filtered.length}</span> of{" "}
+                <span className="text-neutral-400 font-medium">{history.length}</span> results
+                {hasFilters && (
+                  <button
+                    onClick={() => {
+                      setSearchQuery("");
+                      setActiveTypeFilter("all");
+                      setActiveStatusFilter("all");
+                    }}
+                    className="ml-2 text-indigo-400 hover:text-indigo-300 underline"
+                  >
+                    Clear filters
+                  </button>
+                )}
+              </p>
+            </motion.div>
+          )}
+
           {/* Error state */}
           {error && (
-            <Alert
-              variant="destructive"
-              className="mb-8 bg-red-950/30 border-red-900 text-red-400"
-            >
+            <Alert variant="destructive" className="mb-8 bg-red-950/30 border-red-900 text-red-400">
               <AlertCircle className="w-4 h-4" />
               <AlertTitle>Failed to load history</AlertTitle>
               <AlertDescription>{error}</AlertDescription>
@@ -544,8 +488,30 @@ export default function HistoryPage() {
             </motion.div>
           )}
 
+          {/* No filter results */}
+          {!loading && !error && history.length > 0 && filtered.length === 0 && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="flex flex-col items-center justify-center py-24 gap-3"
+            >
+              <Search className="w-12 h-12 text-neutral-800" />
+              <p className="text-neutral-500 font-medium">No results match your filters</p>
+              <button
+                onClick={() => {
+                  setSearchQuery("");
+                  setActiveTypeFilter("all");
+                  setActiveStatusFilter("all");
+                }}
+                className="text-sm text-indigo-400 hover:text-indigo-300"
+              >
+                Clear all filters
+              </button>
+            </motion.div>
+          )}
+
           {/* History list */}
-          {!loading && history.length > 0 && (
+          {!loading && filtered.length > 0 && (
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -561,24 +527,16 @@ export default function HistoryPage() {
                 <span className="col-span-1 text-right">Action</span>
               </div>
 
-              {history.map((item, i) => {
-                const typeMeta = TYPE_META[item.type] ?? {
-                  label: item.type,
-                  icon: <FileText className="w-3 h-3" />,
-                  color: "text-neutral-400 border-neutral-700 bg-neutral-800/30",
-                };
-                const statusMeta = STATUS_META[item.status] ?? {
-                  label: item.status,
-                  icon: <Clock className="w-3 h-3" />,
-                  color: "text-neutral-400 border-neutral-700 bg-neutral-800/30",
-                };
+              {filtered.map((item, i) => {
+                const typeMeta = TYPE_META[item.research_type] ?? getTypeMetaFallback(item.research_type);
+                const statusMeta = STATUS_META[item.status] ?? getStatusMetaFallback(item.status);
 
                 return (
                   <motion.div
                     key={item.job_id}
                     initial={{ opacity: 0, y: 8 }}
                     animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: i * 0.04 }}
+                    transition={{ delay: i * 0.03 }}
                     className="group bg-neutral-900/30 hover:bg-neutral-900/60 border border-neutral-800 hover:border-neutral-700 rounded-xl p-4 transition-all cursor-pointer"
                     onClick={() => setSelectedItem(item)}
                   >
@@ -587,18 +545,15 @@ export default function HistoryPage() {
                       <p className="font-medium text-sm text-white truncate">{item.query}</p>
                       <div className="flex flex-wrap gap-2">
                         <Badge variant="outline" className={`text-[10px] gap-1 ${typeMeta.color}`}>
-                          {typeMeta.icon} {typeMeta.label}
+                          <IconForType type={item.research_type} /> {typeMeta.label}
                         </Badge>
-                        <Badge
-                          variant="outline"
-                          className={`text-[10px] gap-1 ${statusMeta.color}`}
-                        >
+                        <Badge variant="outline" className={`text-[10px] gap-1 ${statusMeta.color}`}>
                           {statusMeta.icon} {statusMeta.label}
                         </Badge>
                       </div>
                       <div className="flex items-center justify-between">
                         <span className="text-[10px] text-neutral-600 font-mono">
-                          {formatDate(item.created_at)}
+                          {formatRelative(item.created_at)}
                         </span>
                         <Button size="sm" variant="ghost" className="text-xs text-indigo-400 h-7 px-2">
                           View <ChevronRight className="w-3 h-3 ml-1" />
@@ -610,26 +565,27 @@ export default function HistoryPage() {
                     <div className="hidden md:grid grid-cols-12 gap-4 items-center">
                       <div className="col-span-4 flex items-center gap-3 min-w-0">
                         <div className="w-7 h-7 rounded-md bg-neutral-800 flex items-center justify-center shrink-0 text-neutral-500">
-                          {typeMeta.icon}
+                          <IconForType type={item.research_type} />
                         </div>
                         <p className="font-medium text-sm text-white truncate">{item.query}</p>
                       </div>
                       <div className="col-span-2">
                         <Badge variant="outline" className={`text-[10px] gap-1 ${typeMeta.color}`}>
-                          {typeMeta.icon} {typeMeta.label}
+                          <IconForType type={item.research_type} /> {typeMeta.label}
                         </Badge>
                       </div>
                       <div className="col-span-2">
-                        <Badge
-                          variant="outline"
-                          className={`text-[10px] gap-1 ${statusMeta.color}`}
-                        >
+                        <Badge variant="outline" className={`text-[10px] gap-1 ${statusMeta.color}`}>
                           {statusMeta.icon} {statusMeta.label}
                         </Badge>
                       </div>
                       <div className="col-span-3">
-                        <span className="text-[11px] text-neutral-500 font-mono">
-                          {formatDate(item.created_at)}
+                        <span
+                          className="text-[11px] text-neutral-500 font-mono"
+                          title={formatDate(item.created_at)}
+                        >
+                          {formatRelative(item.created_at)}
+                          <span className="ml-1 text-neutral-700">· {formatDate(item.created_at)}</span>
                         </span>
                       </div>
                       <div className="col-span-1 flex justify-end">
@@ -664,9 +620,7 @@ export default function HistoryPage() {
       </footer>
 
       {/* Report Modal */}
-      {selectedItem && (
-        <ReportModal item={selectedItem} onClose={() => setSelectedItem(null)} />
-      )}
+      {selectedItem && <ReportModal item={selectedItem} onClose={() => setSelectedItem(null)} />}
     </div>
   );
 }

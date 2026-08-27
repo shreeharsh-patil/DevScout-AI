@@ -61,7 +61,7 @@ class AgentOrchestrator:
                 raw_data = self.researcher.search_web_exa(f"{query} startup competitors market", num_results=10)
                 analysis = self.analyzer.analyze_idea(raw_data)
                 report = self.reporter.generate_markdown_report(analysis, research_type)
-                
+
             elif research_type == "social":
                 raw_data = self.researcher.search_social_tracker(query)
                 analysis = self.analyzer.analyze_social_tracker(raw_data)
@@ -74,11 +74,26 @@ class AgentOrchestrator:
                 report = self.reporter.generate_markdown_report(analysis, research_type)
 
             elif research_type == "npm":
-                # query is a package name
+                # query is a package name or URL
                 raw_data = self.researcher.fetch_npm_package(query)
                 analysis = self.analyzer.analyze_npm(raw_data)
                 report = self.reporter.generate_markdown_report(analysis, research_type)
-            
+
+            elif research_type == "hackernews":
+                raw_data = self.researcher.search_web_exa(f"site:news.ycombinator.com {query}", num_results=10)
+                analysis = self.analyzer.analyze_hackernews(raw_data)
+                report = self.reporter.generate_markdown_report(analysis, research_type)
+
+            elif research_type == "github-repo":
+                raw_data = self.researcher.fetch_github_repo(query)
+                analysis = self.analyzer.analyze_github_repo(raw_data)
+                # Merge contributor and language data so the reporter can render them
+                if "error" not in raw_data:
+                    analysis.setdefault("languages", raw_data.get("languages", {}))
+                    analysis.setdefault("contributors", raw_data.get("contributors", []))
+                    analysis.setdefault("language", raw_data.get("language", ""))
+                report = self.reporter.generate_markdown_report(analysis, research_type)
+
             else:
                 raise ValueError(f"Unsupported research type: {research_type}")
 

@@ -1,0 +1,38 @@
+[project]
+name = "devscout-api"
+version = "0.1.0"
+description = "DevScout AI - Multi-Agent Developer & Startup Intelligence Engine"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+    { name = "Shreeharsh Patil" }
+]
+dependencies = [
+    "fastapi>=0.110.0,<1.0.0",
+    "uvicorn[standard]>=0.28.0,<1.0.0",
+    "pydantic>=2.6.0,<3.0.0",
+    "sqlalchemy>=2.0.0,<3.0.0",
+    "psycopg2-binary>=2.9.9,<3.0.0",
+    "requests>=2.31.0,<3.0.0",
+    "loguru>=0.7.2,<1.0.0",
+    "python-dotenv>=1.0.0,<2.0.0",
+    "google-generativeai>=0.8.0,<1.0.0",
+    "yt-dlp>=2024.0.0",
+    "alembic>=1.13.0,<2.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "httpx>=0.27.0",
+    "ruff>=0.8.0",
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["agents*"]

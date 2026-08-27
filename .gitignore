@@ -1,4 +1,60 @@
+# Byte-compiled / optimized / C-extensions
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+*.pyo
+
+# Databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Virtual Environments
+.venv/
+venv/
+ENV/
+env/
+env.bak/
+venv.bak/
+
+# Node & Frontend dependencies / build
+node_modules/
+.next/
+/out/
+/build
+dist/
+*.tsbuildinfo
+next-env.d.ts
+
+# Testing & Linting caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage/
+htmlcov/
+*.egg-info/
+
+# Logs & Runtime
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# OS generated
+.DS_Store
+Thumbs.db
+
+# Package / Agent specific local data
+.agent-reach/
+.claude/settings.local.json
+
 # Environment variables - never commit secrets
 .env
-.env.local
 .env.*
+!.env.example
+!.env.*.example
+!.env.example*
+
