@@ -296,6 +296,182 @@ class ReporterAgent:
                     md_content += f"- {insight}\n"
                 md_content += f"\n### Primary Use Case\n{analysis.get('primary_use_case', 'N/A')}\n"
 
+        elif report_type == "repository":
+            if analysis.get("status") == "error":
+                md_content += f"### Error\n{analysis.get('summary', 'Unknown error occurred.')}\n"
+            else:
+                # ── Score & Breakdown ──
+                score = analysis.get('score', 0)
+                breakdown = analysis.get('score_breakdown', {})
+                weights = analysis.get('weights', {})
+
+                md_content += f"## Repository Score: {score}/100\n\n"
+                md_content += f"*Score components: "
+                parts = []
+                for k, v in breakdown.items():
+                    w = weights.get(k, 0) * 100
+                    label = k.replace("_", " ").title()
+                    parts.append(f"{label}: {v}/100 (weight {w:.0f}%)")
+                md_content += " | ".join(parts) + "*\n\n"
+
+                # ── Repository overview ──
+                md_content += f"### Repository Overview\n\n"
+                md_content += f"**Name:** [{analysis.get('repo_name', '')}]({analysis.get('repo_url', '')})\n\n"
+                md_content += f"**Description:** {analysis.get('description', 'No description provided.')}\n\n"
+                md_content += f"**Primary Language:** {analysis.get('language', 'Unknown')}\n\n"
+                md_content += f"**License:** {analysis.get('license', 'None')}\n\n"
+                if analysis.get('archived'):
+                    md_content += f"> This repository is **archived** and no longer maintained.\n\n"
+
+                # ── Key Metrics ──
+                md_content += f"### Key Metrics\n\n"
+                md_content += f"| Metric | Value |\n|---|---|\n"
+                md_content += f"| ⭐ Stars | {analysis.get('stars', 0):,} |\n"
+                md_content += f"| 🍴 Forks | {analysis.get('forks', 0):,} |\n"
+                md_content += f"| 👀 Watchers | {analysis.get('watchers', 0):,} |\n"
+                md_content += f"| 🐛 Open Issues | {analysis.get('open_issues', 0):,} |\n"
+                md_content += f"| 🔀 Open PRs | {analysis.get('open_prs_count', 0):,} |\n"
+                age_days = analysis.get('age_days', 0)
+                if age_days >= 365:
+                    age_str = f"{age_days // 365}y {(age_days % 365) // 30}m"
+                else:
+                    age_str = f"{age_days} days"
+                md_content += f"| 📅 Repository Age | {age_str} |\n"
+                last_active = analysis.get('last_activity_days', 0)
+                if last_active == 0:
+                    active_str = "Today"
+                elif last_active == 1:
+                    active_str = "Yesterday"
+                elif last_active <= 30:
+                    active_str = f"{last_active} days ago"
+                else:
+                    active_str = f"{last_active} days ago — may be inactive"
+                md_content += f"| 🕐 Last Activity | {active_str} |\n"
+                md_content += f"\n"
+
+                # ── Topic Tags ──
+                topics = analysis.get('topics', [])
+                if topics:
+                    md_content += f"### Topics\n\n"
+                    md_content += " ".join(f"`{t}`" for t in topics[:15]) + "\n\n"
+
+                # ── Technology Stack ──
+                tech_stack = analysis.get('tech_stack', [])
+                if tech_stack:
+                    md_content += f"### Technology Stack\n\n"
+                    for t in tech_stack:
+                        bar_len = max(1, int(t['percentage'] / 5))
+                        bar = "█" * bar_len + "░" * (20 - bar_len)
+                        md_content += f"- **{t['language']}** ({t['percentage']}%) {bar}\n"
+                    md_content += "\n"
+                else:
+                    raw_languages = analysis.get('languages', {})
+                    if raw_languages:
+                        md_content += f"### Languages\n\n"
+                        for lang, bytes_count in raw_languages.items():
+                            md_content += f"- {lang}: {bytes_count:,} bytes\n"
+                        md_content += "\n"
+
+                # ── Assessments ──
+                md_content += f"### Assessments\n\n"
+                for key, label in [
+                    ('health_assessment', '🏥 Health'),
+                    ('maintenance_assessment', '🔧 Maintenance'),
+                    ('technology_assessment', '⚡ Technology'),
+                    ('community_assessment', '👥 Community'),
+                    ('documentation_assessment', '📖 Documentation'),
+                ]:
+                    val = analysis.get(key, '')
+                    if val:
+                        md_content += f"**{label}:** {val}\n\n"
+
+                # ── Notable Strengths ──
+                strengths = analysis.get('notable_strengths', [])
+                if strengths:
+                    md_content += f"### Notable Strengths\n\n"
+                    for s in strengths:
+                        md_content += f"- ✅ {s}\n"
+                    md_content += "\n"
+
+                # ── Key Risks ──
+                risks = analysis.get('key_risks', [])
+                if risks:
+                    md_content += f"### Key Risks\n\n"
+                    for r in risks:
+                        md_content += f"- ⚠️ {r}\n"
+                    md_content += "\n"
+
+                # ── Recommendation ──
+                recommendation = analysis.get('recommendation', '')
+                if recommendation:
+                    md_content += f"### Recommendation\n\n"
+                    md_content += f"> {recommendation}\n\n"
+
+                # ── Contributors ──
+                contribs = analysis.get('contributors_summary', [])
+                if contribs:
+                    md_content += f"### Top Contributors\n\n"
+                    for c in contribs[:10]:
+                        md_content += f"- [{c['login']}](https://github.com/{c['login']}) — {c['contributions']:,} commits ({c['percentage']}%)\n"
+                    md_content += "\n"
+
+                # ── Recent Commits ──
+                commits = analysis.get('recent_commits', [])
+                if commits:
+                    md_content += f"### Recent Commits\n\n"
+                    for c in commits[:8]:
+                        md_content += f"- `{c['sha']}` {c['message']} — *{c['author']}* ({c['date'][:10]})\n"
+                    md_content += "\n"
+
+                # ── Releases ──
+                rels = analysis.get('releases', [])
+                if rels:
+                    md_content += f"### Releases\n\n"
+                    for r in rels[:5]:
+                        pre = " *(pre-release)*" if r.get('prerelease') else ""
+                        md_content += f"- **{r['tag_name']}** — {r.get('name', '')}{pre} ({r['published_at'][:10] if r.get('published_at') else 'N/A'})\n"
+                    md_content += "\n"
+
+                # ── Open Issues ──
+                issues = analysis.get('open_issues_list', [])
+                if issues:
+                    md_content += f"### Recent Open Issues\n\n"
+                    for iss in issues[:8]:
+                        labels = ", ".join(iss.get('labels', [])[:3])
+                        label_badge = f" [{labels}]" if labels else ""
+                        md_content += f"- #{iss['number']} {iss['title']}{label_badge}\n"
+                    md_content += "\n"
+
+                # ── Pull Requests ──
+                prs = analysis.get('pull_requests', [])
+                if prs:
+                    md_content += f"### Open Pull Requests\n\n"
+                    for pr in prs[:8]:
+                        md_content += f"- #{pr['number']} {pr['title']} — *{pr['user']}* (+{pr.get('additions', 0)}/-{pr.get('deletions', 0)})\n"
+                    md_content += "\n"
+
+                # ── Project Structure ──
+                structure = analysis.get('structure_summary', {})
+                if structure and isinstance(structure, dict):
+                    dirs = structure.get('directories', [])
+                    files = structure.get('files', [])
+                    if dirs or files:
+                        md_content += f"### Project Structure\n\n"
+                        if dirs:
+                            md_content += f"**Directories:** {', '.join(dirs[:12])}\n\n"
+                        if files:
+                            md_content += f"**Files:** {', '.join(files[:12])}\n\n"
+
+                # ── README excerpt ──
+                readme = analysis.get('readme_excerpt', '')
+                if readme:
+                    md_content += f"### README Excerpt\n\n"
+                    md_content += f"```\n{readme[:1500]}\n```\n\n"
+
+                # ── Footer ──
+                md_content += "---\n"
+                md_content += f"*Repository intelligence synthesized by DevScout AI using GitHub API data. All metrics are derived from retrieved data.*\n"
+
         else:
             md_content += "Report generation for this type is not yet implemented.\n"
             md_content += str(analysis)

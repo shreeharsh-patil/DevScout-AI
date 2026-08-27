@@ -364,6 +364,278 @@ class ResearcherAgent:
             logger.error(f"GitHub repo fetch failed: {e}")
             return {"error": str(e)}
 
+    def fetch_repository_intelligence(self, query: str) -> dict:
+        """
+        Comprehensive repository intelligence collection.
+        Gathers metadata, recent activity, releases, expanded contributors,
+        open issues, pull requests, README, project structure, and
+        dependency information when discoverable.
+        Accepts 'owner/repo' slug or a full GitHub URL.
+        """
+        # Parse owner/repo from either a URL or a direct slug
+        if "github.com/" in query:
+            slug = query.split("github.com/")[-1].strip("/")
+        else:
+            slug = query.strip("/")
+
+        parts = slug.split("/")
+        if len(parts) < 2:
+            logger.error(f"Invalid repository query: {query}")
+            return {"error": f"Cannot parse owner/repo from: {query}"}
+
+        owner, repo = parts[0], parts[1]
+        repo_path = f"{owner}/{repo}"
+        logger.info(f"Fetching repository intelligence: {repo_path}")
+
+        try:
+            # ── 1. Core repository metadata ──
+            repo_resp = requests.get(
+                f"https://api.github.com/repos/{repo_path}",
+                headers=self.headers, timeout=10
+            )
+            if repo_resp.status_code != 200:
+                logger.error(f"GitHub repo fetch failed: {repo_resp.status_code}")
+                return {"error": f"Repository '{repo_path}' not found or inaccessible."}
+            repo_data = repo_resp.json()
+
+            license_info = repo_data.get("license") or {}
+
+            # ── 2. Contributors (top 30 for meaningful analysis) ──
+            contributors = []
+            try:
+                contrib_resp = requests.get(
+                    f"https://api.github.com/repos/{repo_path}/contributors?per_page=30",
+                    headers=self.headers, timeout=10
+                )
+                if contrib_resp.status_code == 200:
+                    for c in contrib_resp.json():
+                        contributors.append({
+                            "login": c.get("login", ""),
+                            "contributions": c.get("contributions", 0),
+                            "type": c.get("type", "User"),
+                        })
+            except Exception:
+                pass
+
+            # ── 3. Language breakdown ──
+            languages = {}
+            try:
+                lang_resp = requests.get(
+                    f"https://api.github.com/repos/{repo_path}/languages",
+                    headers=self.headers, timeout=10
+                )
+                if lang_resp.status_code == 200:
+                    languages = lang_resp.json()
+            except Exception:
+                pass
+
+            # ── 4. Recent commits (last 10) ──
+            recent_commits = []
+            try:
+                commits_resp = requests.get(
+                    f"https://api.github.com/repos/{repo_path}/commits?per_page=10",
+                    headers=self.headers, timeout=10
+                )
+                if commits_resp.status_code == 200:
+                    for c in commits_resp.json():
+                        commit_info = c.get("commit", {})
+                        recent_commits.append({
+                            "sha": c.get("sha", "")[:7],
+                            "message": commit_info.get("message", "").split("\n")[0][:120],
+                            "author": commit_info.get("author", {}).get("name", ""),
+                            "date": commit_info.get("author", {}).get("date", ""),
+                        })
+            except Exception:
+                pass
+
+            # ── 5. Releases (last 10) ──
+            releases = []
+            try:
+                releases_resp = requests.get(
+                    f"https://api.github.com/repos/{repo_path}/releases?per_page=10",
+                    headers=self.headers, timeout=10
+                )
+                if releases_resp.status_code == 200:
+                    for r in releases_resp.json():
+                        releases.append({
+                            "tag_name": r.get("tag_name", ""),
+                            "name": r.get("name", ""),
+                            "published_at": r.get("published_at", ""),
+                            "prerelease": r.get("prerelease", False),
+                        })
+            except Exception:
+                pass
+
+            # ── 6. Open issues (last 10, with labels) ──
+            open_issues_list = []
+            try:
+                issues_resp = requests.get(
+                    f"https://api.github.com/repos/{repo_path}/issues?state=open&per_page=10&sort=updated",
+                    headers=self.headers, timeout=10
+                )
+                if issues_resp.status_code == 200:
+                    for iss in issues_resp.json():
+                        # Skip pull requests (GitHub API mixes them in issues endpoint)
+                        if "pull_request" in iss:
+                            continue
+                        open_issues_list.append({
+                            "number": iss.get("number", 0),
+                            "title": iss.get("title", "").strip()[:100],
+                            "labels": [l.get("name", "") for l in iss.get("labels", [])],
+                            "created_at": iss.get("created_at", ""),
+                            "comments": iss.get("comments", 0),
+                        })
+            except Exception:
+                pass
+
+            # ── 7. Pull requests (last 10, open) ──
+            pull_requests = []
+            try:
+                pr_resp = requests.get(
+                    f"https://api.github.com/repos/{repo_path}/pulls?state=open&per_page=10&sort=updated",
+                    headers=self.headers, timeout=10
+                )
+                if pr_resp.status_code == 200:
+                    for pr in pr_resp.json():
+                        pull_requests.append({
+                            "number": pr.get("number", 0),
+                            "title": pr.get("title", "").strip()[:100],
+                            "user": pr.get("user", {}).get("login", ""),
+                            "created_at": pr.get("created_at", ""),
+                            "additions": pr.get("additions", 0),
+                            "deletions": pr.get("deletions", 0),
+                        })
+            except Exception:
+                pass
+
+            # ── 8. README ──
+            readme_content = ""
+            try:
+                readme_resp = requests.get(
+                    f"https://api.github.com/repos/{repo_path}/readme",
+                    headers={**self.headers, "Accept": "application/vnd.github.v3.raw"},
+                    timeout=15
+                )
+                if readme_resp.status_code == 200:
+                    readme_content = readme_resp.text[:8000]  # Limit for context
+            except Exception:
+                pass
+
+            # ── 9. Project structure (root directory listing) ──
+            root_contents = []
+            try:
+                contents_resp = requests.get(
+                    f"https://api.github.com/repos/{repo_path}/contents/",
+                    headers=self.headers, timeout=10
+                )
+                if contents_resp.status_code == 200:
+                    for item in contents_resp.json():
+                        root_contents.append({
+                            "name": item.get("name", ""),
+                            "type": item.get("type", ""),
+                            "size": item.get("size", 0),
+                        })
+            except Exception:
+                pass
+
+            # ── 10. Dependencies (discoverable from common manifest files) ──
+            dependencies: dict = {}
+            manifest_files = [
+                "package.json",
+                "requirements.txt",
+                "Cargo.toml",
+                "go.mod",
+                "pom.xml",
+                "Gemfile",
+                "build.gradle",
+            ]
+            for mf in manifest_files:
+                try:
+                    dep_resp = requests.get(
+                        f"https://api.github.com/repos/{repo_path}/contents/{mf}",
+                        headers={**self.headers, "Accept": "application/vnd.github.v3.raw"},
+                        timeout=10
+                    )
+                    if dep_resp.status_code == 200 and dep_resp.text.strip():
+                        dependencies[mf] = dep_resp.text[:4000]  # Limit per file
+                        break  # Only fetch the first manifest found
+                except Exception:
+                    continue
+
+            # ── 11. Computed fields ──
+            from datetime import datetime, timezone
+            created = repo_data.get("created_at", "")
+            pushed = repo_data.get("pushed_at", "")
+            age_days = 0
+            if created:
+                try:
+                    created_dt = datetime.fromisoformat(created.replace("Z", "+00:00"))
+                    age_days = (datetime.now(timezone.utc) - created_dt).days
+                except Exception:
+                    pass
+
+            last_activity_days = 0
+            if pushed:
+                try:
+                    pushed_dt = datetime.fromisoformat(pushed.replace("Z", "+00:00"))
+                    last_activity_days = (datetime.now(timezone.utc) - pushed_dt).days
+                except Exception:
+                    pass
+
+            # Total open PRs count (from repo metadata, not the paginated list)
+            open_prs_count = 0
+            try:
+                pr_search_resp = requests.get(
+                    f"https://api.github.com/search/issues?q=repo:{repo_path}+type:pr+state:open&per_page=1",
+                    headers=self.headers, timeout=10
+                )
+                if pr_search_resp.status_code == 200:
+                    open_prs_count = pr_search_resp.json().get("total_count", 0)
+            except Exception:
+                pass
+
+            return {
+                # Core metadata
+                "name": repo_data.get("full_name", repo_path),
+                "description": repo_data.get("description", ""),
+                "url": repo_data.get("html_url", f"https://github.com/{repo_path}"),
+                "stars": repo_data.get("stargazers_count", 0),
+                "forks": repo_data.get("forks_count", 0),
+                "watchers": repo_data.get("watchers_count", 0),
+                "open_issues": repo_data.get("open_issues_count", 0),
+                "language": repo_data.get("language", ""),
+                "topics": repo_data.get("topics", []),
+                "license": license_info.get("spdx_id", "None"),
+                "default_branch": repo_data.get("default_branch", "main"),
+                "archived": repo_data.get("archived", False),
+                "fork": repo_data.get("fork", False),
+                # Computed fields
+                "created_at": created,
+                "pushed_at": pushed,
+                "age_days": age_days,
+                "last_activity_days": last_activity_days,
+                # Detailed data
+                "languages": languages,
+                "topics": repo_data.get("topics", []),
+                "contributors": contributors,
+                "recent_commits": recent_commits,
+                "releases": releases,
+                "open_issues_list": open_issues_list,
+                "open_prs_count": open_prs_count,
+                "pull_requests": pull_requests,
+                "readme": readme_content,
+                "root_contents": root_contents,
+                "dependencies": dependencies,
+                # Counts for scoring
+                "total_contributors": len(contributors),
+                "total_releases": len(releases),
+                "total_commits_fetched": len(recent_commits),
+            }
+
+        except Exception as e:
+            logger.error(f"Repository intelligence fetch failed: {e}")
+            return {"error": str(e)}
+
     def fetch_npm_package(self, package_name: str) -> dict:
         """Fetches npm package metadata + downloads."""
         logger.info(f"Fetching npm package: {package_name}")

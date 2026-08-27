@@ -1,5 +1,5 @@
+from typing import Dict, Optional, Callable
 from loguru import logger
-from typing import Dict
 from .researcher import ResearcherAgent
 from .analyzer import AnalyzerAgent
 from .reporter import ReporterAgent
@@ -14,89 +14,129 @@ class AgentOrchestrator:
     """
     Coordinates the multi-agent system to run research jobs.
     Routes the query to the correct agents and synthesizes the report.
+    Supports stage callbacks for real-time progress tracking.
     """
     def __init__(self):
         self.researcher = ResearcherAgent()
         self.analyzer = AnalyzerAgent()
         self.reporter = ReporterAgent()
 
-    def run_pipeline(self, query: str, research_type: str) -> Dict:
+    def run_pipeline(
+        self,
+        query: str,
+        research_type: str,
+        on_stage_change: Optional[Callable[[str], None]] = None
+    ) -> Dict:
         logger.info(f"Orchestrator starting pipeline for {research_type}: {query}")
         
+        def _notify_stage(stage: str):
+            if on_stage_change:
+                try:
+                    on_stage_change(stage)
+                except Exception as ex:
+                    logger.warning(f"Failed to trigger stage callback for '{stage}': {ex}")
+
         raw_data = {}
         analysis = {}
         report = ""
 
         try:
+            # 1. Research Phase
+            _notify_stage("researching")
+            
             if research_type == "developer":
-                # Assuming query is a github handle
                 raw_data = self.researcher.fetch_github_profile(query)
+                _notify_stage("analyzing")
                 analysis = self.analyzer.analyze_developer(raw_data)
+                _notify_stage("reporting")
                 report = self.reporter.generate_markdown_report(analysis, research_type)
                 
             elif research_type == "startup":
-                # Assuming query is a URL
                 raw_data = {"website_text": self.researcher.fetch_web_page(query)}
+                _notify_stage("analyzing")
                 analysis = self.analyzer.analyze_startup(raw_data["website_text"])
+                _notify_stage("reporting")
                 report = self.reporter.generate_markdown_report(analysis, research_type)
                 
             elif research_type == "email":
-                # Assuming query is an email address
                 raw_data = self.researcher.search_email_osint(query)
+                _notify_stage("analyzing")
                 analysis = self.analyzer.analyze_email(raw_data)
+                _notify_stage("reporting")
                 report = self.reporter.generate_markdown_report(analysis, research_type)
                 
             elif research_type == "youtube":
-                # Assuming query is a YouTube URL
                 raw_data = self.researcher.fetch_youtube_info(query)
+                _notify_stage("analyzing")
                 analysis = self.analyzer.analyze_youtube(raw_data)
+                _notify_stage("reporting")
                 report = self.reporter.generate_markdown_report(analysis, research_type)
                 
             elif research_type == "reddit":
                 raw_data = self.researcher.search_web_exa(f"site:reddit.com {query}", num_results=10)
+                _notify_stage("analyzing")
                 analysis = self.analyzer.analyze_reddit(raw_data)
+                _notify_stage("reporting")
                 report = self.reporter.generate_markdown_report(analysis, research_type)
                 
             elif research_type == "idea":
                 raw_data = self.researcher.search_web_exa(f"{query} startup competitors market", num_results=10)
+                _notify_stage("analyzing")
                 analysis = self.analyzer.analyze_idea(raw_data)
+                _notify_stage("reporting")
                 report = self.reporter.generate_markdown_report(analysis, research_type)
 
             elif research_type == "social":
                 raw_data = self.researcher.search_social_tracker(query)
+                _notify_stage("analyzing")
                 analysis = self.analyzer.analyze_social_tracker(raw_data)
+                _notify_stage("reporting")
                 report = self.reporter.generate_markdown_report(analysis, research_type)
 
             elif research_type == "linkedin":
-                # query is a LinkedIn profile URL
                 raw_data = {"profile_text": self.researcher.fetch_linkedin_profile(query)}
+                _notify_stage("analyzing")
                 analysis = self.analyzer.analyze_linkedin(raw_data["profile_text"])
+                _notify_stage("reporting")
                 report = self.reporter.generate_markdown_report(analysis, research_type)
 
             elif research_type == "npm":
-                # query is a package name or URL
                 raw_data = self.researcher.fetch_npm_package(query)
+                _notify_stage("analyzing")
                 analysis = self.analyzer.analyze_npm(raw_data)
+                _notify_stage("reporting")
                 report = self.reporter.generate_markdown_report(analysis, research_type)
 
             elif research_type == "hackernews":
                 raw_data = self.researcher.search_web_exa(f"site:news.ycombinator.com {query}", num_results=10)
+                _notify_stage("analyzing")
                 analysis = self.analyzer.analyze_hackernews(raw_data)
+                _notify_stage("reporting")
                 report = self.reporter.generate_markdown_report(analysis, research_type)
 
             elif research_type == "github-repo":
                 raw_data = self.researcher.fetch_github_repo(query)
+                _notify_stage("analyzing")
                 analysis = self.analyzer.analyze_github_repo(raw_data)
-                # Merge contributor and language data so the reporter can render them
                 if "error" not in raw_data:
                     analysis.setdefault("languages", raw_data.get("languages", {}))
                     analysis.setdefault("contributors", raw_data.get("contributors", []))
                     analysis.setdefault("language", raw_data.get("language", ""))
+                _notify_stage("reporting")
+                report = self.reporter.generate_markdown_report(analysis, research_type)
+
+            elif research_type == "repository":
+                # Comprehensive repository intelligence
+                raw_data = self.researcher.fetch_repository_intelligence(query)
+                _notify_stage("analyzing")
+                analysis = self.analyzer.analyze_repository(raw_data)
+                _notify_stage("reporting")
                 report = self.reporter.generate_markdown_report(analysis, research_type)
 
             else:
                 raise ValueError(f"Unsupported research type: {research_type}")
 
+            _notify_stage("completed")
             logger.info("Pipeline completed successfully.")
             return {
                 "status": "completed",
@@ -118,3 +158,4 @@ class AgentOrchestrator:
                 "status": "failed",
                 "error": str(e)
             }
+

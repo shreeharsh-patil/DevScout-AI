@@ -883,3 +883,423 @@ class AnalyzerAgent:
             "primary_use_case": "Add GEMINI_API_KEY to .env for AI-powered use case analysis."
         }
 
+    def analyze_repository(self, repo_data: dict) -> dict:
+        """
+        Comprehensive repository analysis using ONLY retrieved data.
+        Uses a transparent, deterministic scoring formula.
+        No metrics are invented — every statement derives from collected data.
+        """
+        logger.info(f"Analyzing repository: {repo_data.get('name', 'Unknown') if isinstance(repo_data, dict) else 'Unknown'}")
+
+        if not repo_data or not isinstance(repo_data, dict) or repo_data.get("error") or not repo_data.get("name"):
+            return {
+                "status": "error",
+                "summary": repo_data.get("error", "Repository not found.") if isinstance(repo_data, dict) else "Repository not found."
+            }
+
+        # ── Extract all raw metrics ──
+        stars = repo_data.get("stars", 0)
+        forks = repo_data.get("forks", 0)
+        watchers = repo_data.get("watchers", 0)
+        open_issues = repo_data.get("open_issues", 0)
+        age_days = repo_data.get("age_days", 0)
+        last_activity_days = repo_data.get("last_activity_days", 9999)
+        contributors = repo_data.get("contributors", [])
+        releases = repo_data.get("releases", [])
+        recent_commits = repo_data.get("recent_commits", [])
+        open_issues_list = repo_data.get("open_issues_list", [])
+        pull_requests = repo_data.get("pull_requests", [])
+        open_prs_count = repo_data.get("open_prs_count", 0)
+        languages = repo_data.get("languages", {})
+        topics = repo_data.get("topics", [])
+        readme = repo_data.get("readme", "")
+        root_contents = repo_data.get("root_contents", [])
+        dependencies = repo_data.get("dependencies", {})
+        archived = repo_data.get("archived", False)
+        is_fork = repo_data.get("fork", False)
+
+        # ── Transparent scoring formula ──
+        # Each component is 0-100, weighted, then combined.
+        score_components = {}
+
+        # 1. Community Adoption (0-100, weight 25%)
+        #    Logarithmic scale: 1 star=0, 10=25, 100=50, 1000=75, 10000=90, 100000=100
+        import math
+        if stars <= 0:
+            adoption = 0
+        else:
+            adoption = min(100, round(math.log10(max(stars, 1)) * 20))
+        score_components["community_adoption"] = adoption
+
+        # 2. Maintenance Activity (0-100, weight 25%)
+        #    Based on days since last push, commit recency, and release cadence
+        if archived:
+            maintenance = 0
+        elif last_activity_days <= 7:
+            maintenance = 100
+        elif last_activity_days <= 30:
+            maintenance = 85
+        elif last_activity_days <= 90:
+            maintenance = 70
+        elif last_activity_days <= 180:
+            maintenance = 50
+        elif last_activity_days <= 365:
+            maintenance = 30
+        else:
+            maintenance = 10
+        # Bonus for recent commits in the fetched batch
+        if recent_commits:
+            recent_count = sum(1 for c in recent_commits if c.get("date", "") >= "2025-01-01")
+            maintenance = min(100, maintenance + recent_count * 3)
+        score_components["maintenance_activity"] = maintenance
+
+        # 3. Project Maturity (0-100, weight 20%)
+        #    Based on age and release history
+        if age_days >= 365 * 5:
+            maturity = 90
+        elif age_days >= 365 * 2:
+            maturity = 75
+        elif age_days >= 365:
+            maturity = 60
+        elif age_days >= 180:
+            maturity = 45
+        elif age_days >= 30:
+            maturity = 30
+        else:
+            maturity = 15
+        # Release bonus
+        if len(releases) >= 10:
+            maturity = min(100, maturity + 10)
+        elif len(releases) >= 5:
+            maturity = min(100, maturity + 5)
+        score_components["project_maturity"] = maturity
+
+        # 4. Contribution Activity (0-100, weight 15%)
+        #    Based on contributor count and their commit distribution
+        num_contributors = len(contributors)
+        if num_contributors >= 50:
+            contrib_activity = 90
+        elif num_contributors >= 20:
+            contrib_activity = 75
+        elif num_contributors >= 10:
+            contrib_activity = 60
+        elif num_contributors >= 5:
+            contrib_activity = 45
+        elif num_contributors >= 2:
+            contrib_activity = 30
+        else:
+            contrib_activity = 15
+        # Distribution bonus: if contributions are spread (not all from one person)
+        if num_contributors >= 3:
+            top_contrib = contributors[0].get("contributions", 0) if contributors else 0
+            total_contrib = sum(c.get("contributions", 0) for c in contributors)
+            if total_contrib > 0:
+                concentration = top_contrib / total_contrib
+                if concentration < 0.5:
+                    contrib_activity = min(100, contrib_activity + 15)  # Well distributed
+                elif concentration < 0.7:
+                    contrib_activity = min(100, contrib_activity + 8)
+        score_components["contribution_activity"] = contrib_activity
+
+        # 5. Documentation Quality (0-100, weight 10%)
+        #    Based on README presence, length, and structure
+        doc_score = 0
+        if readme:
+            readme_len = len(readme)
+            if readme_len > 3000:
+                doc_score = 70
+            elif readme_len > 1000:
+                doc_score = 50
+            elif readme_len > 200:
+                doc_score = 30
+            else:
+                doc_score = 15
+            # Structure bonus: headings, code blocks, links
+            if "## " in readme:
+                doc_score = min(100, doc_score + 10)
+            if "```" in readme:
+                doc_score = min(100, doc_score + 10)
+            if "http" in readme:
+                doc_score = min(100, doc_score + 5)
+        score_components["documentation_quality"] = doc_score
+
+        # 6. Community Strength (0-100, weight 5%)
+        #    Based on forks ratio, watchers, and topic tags
+        fork_ratio = forks / max(stars, 1)
+        community = 0
+        if fork_ratio > 0.1:
+            community += 40
+        elif fork_ratio > 0.05:
+            community += 25
+        elif fork_ratio > 0.01:
+            community += 15
+        if watchers > 50:
+            community += 30
+        elif watchers > 10:
+            community += 20
+        elif watchers > 0:
+            community += 10
+        if len(topics) >= 5:
+            community += 20
+        elif len(topics) >= 2:
+            community += 10
+        elif len(topics) >= 1:
+            community += 5
+        score_components["community_strength"] = min(100, community)
+
+        # ── Weighted composite score ──
+        weights = {
+            "community_adoption": 0.25,
+            "maintenance_activity": 0.25,
+            "project_maturity": 0.20,
+            "contribution_activity": 0.15,
+            "documentation_quality": 0.10,
+            "community_strength": 0.05,
+        }
+        total_score = sum(score_components[k] * weights[k] for k in weights)
+        total_score = max(0, min(100, round(total_score)))
+
+        # ── Risk assessment (data-driven) ──
+        risks = []
+        if archived:
+            risks.append("Repository is archived and no longer maintained.")
+        if is_fork:
+            risks.append("This is a fork, not the canonical repository.")
+        if last_activity_days > 365:
+            risks.append(f"No commits in {last_activity_days} days — appears abandoned.")
+        elif last_activity_days > 180:
+            risks.append(f"Last activity was {last_activity_days} days ago — declining activity.")
+        if open_issues > 500:
+            risks.append(f"High open issue count ({open_issues}) — potential maintenance burden.")
+        if num_contributors <= 1:
+            risks.append("Single contributor — bus factor risk.")
+        if not readme or len(readme) < 100:
+            risks.append("Missing or minimal README — poor onboarding documentation.")
+        if not releases:
+            risks.append("No releases found — versioning and stability unclear.")
+        if repo_data.get("license") == "None" or not repo_data.get("license"):
+            risks.append("No license specified — legal usage unclear.")
+
+        # ── Strengths (data-driven) ──
+        strengths = []
+        if stars >= 10000:
+            strengths.append(f"Very high adoption with {stars:,} stars.")
+        elif stars >= 1000:
+            strengths.append(f"Strong adoption with {stars:,} stars.")
+        if last_activity_days <= 7:
+            strengths.append("Very active — commits within the last week.")
+        elif last_activity_days <= 30:
+            strengths.append("Actively maintained — commits within the last month.")
+        if num_contributors >= 20:
+            strengths.append(f"Healthy contributor base ({num_contributors} contributors).")
+        if releases:
+            strengths.append(f"Regular release cadence ({len(releases)} releases found).")
+        if readme and len(readme) > 1000:
+            strengths.append("Well-documented with comprehensive README.")
+        if languages and len(languages) > 1:
+            strengths.append(f"Multi-language codebase ({len(languages)} languages).")
+        if topics:
+            strengths.append(f"Well-tagged ({len(topics)} topics) for discoverability.")
+        if repo_data.get("license") and repo_data.get("license") != "None":
+            strengths.append(f"Licensed under {repo_data.get('license')}.")
+
+        # ── Technology stack from languages ──
+        tech_stack = []
+        if languages:
+            total_bytes = sum(languages.values())
+            for lang, bytes_count in sorted(languages.items(), key=lambda x: x[1], reverse=True):
+                pct = (bytes_count / total_bytes * 100) if total_bytes > 0 else 0
+                if pct >= 1:  # Only include languages with >= 1% of codebase
+                    tech_stack.append({"language": lang, "percentage": round(pct, 1), "bytes": bytes_count})
+
+        # ── Contribution distribution �n        contrib_summary = []
+        if contributors:
+            total_contributions = sum(c.get("contributions", 0) for c in contributors)
+            for c in contributors[:10]:
+                contrib_pct = (c["contributions"] / total_contributions * 100) if total_contributions > 0 else 0
+                contrib_summary.append({
+                    "login": c["login"],
+                    "contributions": c["contributions"],
+                    "percentage": round(contrib_pct, 1),
+                })
+
+        # ── Project structure summary ──
+        structure_summary = []
+        if root_contents:
+            dirs = [i["name"] for i in root_contents if i["type"] == "dir"]
+            files = [i["name"] for i in root_contents if i["type"] == "file"]
+            structure_summary = {
+                "directories": dirs[:15],
+                "files": files[:15],
+                "has_common_manifests": bool(dependencies),
+            }
+
+        # ── Summary generation ──
+        if self.use_llm:
+            logger.info("Using Gemini LLM for Repository Intelligence Analysis")
+            prompt = f"""
+            You are a senior open-source analyst. Analyze the following repository data and provide a professional assessment.
+            CRITICAL ANTI-HALLUCINATION RULES:
+            - Base ALL insights strictly on the metrics provided below.
+            - Do NOT invent features, contributors, or metrics not present in the data.
+            - Every statement must be traceable to a specific data point.
+
+            Repository: {repo_data.get('name')}
+            URL: {repo_data.get('url', '')}
+            Description: {repo_data.get('description', 'None')}
+            Primary Language: {repo_data.get('language', 'None')}
+            Stars: {stars:,}
+            Forks: {forks:,}
+            Watchers: {watchers:,}
+            Open Issues: {open_issues:,}
+            Open PRs: {open_prs_count}
+            License: {repo_data.get('license', 'None')}
+            Age: {age_days} days
+            Days Since Last Activity: {last_activity_days}
+            Total Contributors: {num_contributors}
+            Releases: {len(releases)}
+            Languages: {json.dumps({k: v for k, v in list(languages.items())[:10]})}
+            Topics: {', '.join(topics[:10]) if topics else 'None'}
+            Score: {total_score}/100
+            Score Breakdown: {json.dumps(score_components)}
+
+            Return ONLY a valid JSON object with:
+            {{
+                "summary": "2-3 sentence professional summary",
+                "health_assessment": "One sentence on overall repository health",
+                "maintenance_assessment": "One sentence on maintenance status",
+                "technology_assessment": "One sentence on the tech stack and its implications",
+                "community_assessment": "One sentence on the contributor ecosystem",
+                "documentation_assessment": "One sentence on documentation quality",
+                "notable_strengths": ["strength 1", "strength 2"],
+                "key_risks": ["risk 1", "risk 2"],
+                "recommendation": "Should a developer use/contribute to this? Brief reasoning."
+            }}
+            """
+            try:
+                res_text = self._safe_generate(prompt)
+                res_text = res_text.replace('```json', '').replace('```', '').strip()
+                llm_data = json.loads(res_text)
+                # Merge LLM insights with deterministic data
+                return {
+                    "status": "completed",
+                    "summary": llm_data.get("summary", ""),
+                    "score": total_score,
+                    "score_breakdown": score_components,
+                    "weights": weights,
+                    "health_assessment": llm_data.get("health_assessment", ""),
+                    "maintenance_assessment": llm_data.get("maintenance_assessment", ""),
+                    "technology_assessment": llm_data.get("technology_assessment", ""),
+                    "community_assessment": llm_data.get("community_assessment", ""),
+                    "documentation_assessment": llm_data.get("documentation_assessment", ""),
+                    "notable_strengths": llm_data.get("notable_strengths", strengths),
+                    "key_risks": llm_data.get("key_risks", risks),
+                    "recommendation": llm_data.get("recommendation", ""),
+                    # Deterministic data (always present regardless of LLM)
+                    "repo_name": repo_data.get("name", ""),
+                    "repo_url": repo_data.get("url", ""),
+                    "description": repo_data.get("description", ""),
+                    "stars": stars,
+                    "forks": forks,
+                    "watchers": watchers,
+                    "open_issues": open_issues,
+                    "open_prs_count": open_prs_count,
+                    "language": repo_data.get("language", ""),
+                    "license": repo_data.get("license", "None"),
+                    "age_days": age_days,
+                    "last_activity_days": last_activity_days,
+                    "archived": archived,
+                    "topics": topics,
+                    "tech_stack": tech_stack,
+                    "contributors_summary": contrib_summary,
+                    "recent_commits": recent_commits,
+                    "releases": releases,
+                    "open_issues_list": open_issues_list,
+                    "pull_requests": pull_requests,
+                    "structure_summary": structure_summary,
+                    "readme_excerpt": readme[:2000] if readme else "",
+                }
+            except RuntimeError:
+                raise
+            except Exception as e:
+                logger.error(f"LLM parsing failed for repository analysis: {e}")
+
+        # ── Fallback: deterministic analysis without LLM ──
+        logger.info("No Gemini API key found. Using deterministic repository analysis.")
+
+        summary_parts = []
+        summary_parts.append(f"{repo_data.get('name', 'This repository')} is a {repo_data.get('language', 'Unknown')} project")
+        summary_parts.append(f"with {stars:,} stars and {forks:,} forks.")
+        if repo_data.get('description'):
+            summary_parts.append(repo_data['description'])
+        summary = " ".join(summary_parts)
+
+        health = "healthy" if total_score >= 70 else "moderate" if total_score >= 40 else "low"
+        health_assessment = f"Overall repository health is {health} (score: {total_score}/100)."
+
+        if last_activity_days <= 30:
+            maint = "actively maintained with recent commits"
+        elif last_activity_days <= 180:
+            maint = "moderately active"
+        else:
+            maint = f"last active {last_activity_days} days ago"
+        maintenance_assessment = f"Maintenance status: {maint}."
+
+        tech_assessment = f"Primary language is {repo_data.get('language', 'unknown')}."
+        if tech_stack:
+            lang_list = ", ".join(f"{t['language']} ({t['percentage']}%)" for t in tech_stack[:5])
+            tech_assessment += f" Codebase composition: {lang_list}."
+
+        community_assessment = f"{num_contributors} contributor(s) found."
+        if contrib_summary:
+            top = contrib_summary[0]
+            community_assessment += f" Top contributor: {top['login']} ({top['contributions']} commits, {top['percentage']}%)."
+
+        doc_assessment = "No README found."
+        if readme:
+            doc_len = len(readme)
+            if doc_len > 3000:
+                doc_assessment = f"Comprehensive README ({doc_len:,} characters) with structure and examples."
+            elif doc_len > 1000:
+                doc_assessment = f"Moderate README ({doc_len:,} characters)."
+            else:
+                doc_assessment = f"Minimal README ({doc_len} characters)."
+
+        return {
+            "status": "completed",
+            "summary": summary,
+            "score": total_score,
+            "score_breakdown": score_components,
+            "weights": weights,
+            "health_assessment": health_assessment,
+            "maintenance_assessment": maintenance_assessment,
+            "technology_assessment": tech_assessment,
+            "community_assessment": community_assessment,
+            "documentation_assessment": doc_assessment,
+            "notable_strengths": strengths[:5],
+            "key_risks": risks[:5],
+            "recommendation": f"{'Recommended' if total_score >= 60 else 'Use with caution'} — {health} repository with {stars:,} stars.",
+            # Deterministic data
+            "repo_name": repo_data.get("name", ""),
+            "repo_url": repo_data.get("url", ""),
+            "description": repo_data.get("description", ""),
+            "stars": stars,
+            "forks": forks,
+            "watchers": watchers,
+            "open_issues": open_issues,
+            "open_prs_count": open_prs_count,
+            "language": repo_data.get("language", ""),
+            "license": repo_data.get("license", "None"),
+            "age_days": age_days,
+            "last_activity_days": last_activity_days,
+            "archived": archived,
+            "topics": topics,
+            "tech_stack": tech_stack,
+            "contributors_summary": contrib_summary,
+            "recent_commits": recent_commits,
+            "releases": releases,
+            "open_issues_list": open_issues_list,
+            "pull_requests": pull_requests,
+            "structure_summary": structure_summary,
+            "readme_excerpt": readme[:2000] if readme else "",
+        }

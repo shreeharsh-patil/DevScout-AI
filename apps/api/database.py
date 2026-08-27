@@ -31,8 +31,10 @@ from sqlalchemy import (
     Text,
     create_engine,
     event,
+    text,
 )
 from sqlalchemy.orm import Session, declarative_base, sessionmaker
+
 
 # ---------------------------------------------------------------------------
 # Database URL
@@ -76,6 +78,10 @@ Base = declarative_base()
 # Models
 # ---------------------------------------------------------------------------
 
+def _utc_now():
+    return datetime.datetime.now(datetime.timezone.utc)
+
+
 class Report(Base):
     __tablename__ = "reports"
 
@@ -91,12 +97,13 @@ class Report(Base):
     stage = Column(String(32), nullable=True, default="pending")
 
     created_at = Column(
-        DateTime, nullable=False, default=datetime.datetime.utcnow,
+        DateTime, nullable=False, default=_utc_now,
     )
     updated_at = Column(
-        DateTime, nullable=False, default=datetime.datetime.utcnow,
-        onupdate=datetime.datetime.utcnow,
+        DateTime, nullable=False, default=_utc_now,
+        onupdate=_utc_now,
     )
+
 
     __table_args__ = (
         Index("ix_reports_status", "status"),
@@ -124,5 +131,23 @@ def get_db() -> Generator[Session, None, None]:
 # ---------------------------------------------------------------------------
 
 def ensure_tables() -> None:
-    """Create all tables that don't yet exist (dev convenience only)."""
+    """Create all tables that don't yet exist and ensure all columns are present (dev convenience)."""
     Base.metadata.create_all(bind=engine)
+
+    if _is_sqlite:
+        try:
+            with engine.connect() as conn:
+                result = conn.execute(text("PRAGMA table_info(reports)"))
+                columns = {row[1] for row in result.fetchall()}
+                if columns:
+                    if "error_message" not in columns:
+                        conn.execute(text("ALTER TABLE reports ADD COLUMN error_message TEXT"))
+                    if "stage" not in columns:
+                        conn.execute(text("ALTER TABLE reports ADD COLUMN stage VARCHAR(32) DEFAULT 'pending'"))
+                    if "updated_at" not in columns:
+                        conn.execute(text("ALTER TABLE reports ADD COLUMN updated_at TIMESTAMP"))
+                    conn.commit()
+        except Exception:
+            pass
+
+
