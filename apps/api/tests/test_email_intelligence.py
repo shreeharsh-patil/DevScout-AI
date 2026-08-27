@@ -351,16 +351,17 @@ class TestEmailIntelligenceOrchestratorPipeline:
                     assert "## 📚 Sources & Verification" in result.report_markdown
 
 
-                    # Confirm all real stages executed in sequence
+                    # Confirm all real weighted stages executed in sequence
                     expected_stages = [
                         "validating_email",
-                        "discovering_accounts",
-                        "searching_developer_sources",
-                        "searching_web",
-                        "checking_breaches",
-                        "correlating_identity",
-                        "generating_report",
+                        "checking_developer_sources",
+                        "searching_public_web",
+                        "processing_account_findings",
+                        "correlating_identities",
+                        "scoring_evidence",
+                        "building_report",
                         "completed"
                     ]
                     for s in expected_stages:
                         assert s in stages_recorded
+

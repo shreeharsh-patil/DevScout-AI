@@ -135,10 +135,11 @@ export default function EmailIntelligenceView({ report }: EmailIntelligenceViewP
   const metrics: ProviderMetric[] = analysis.provider_metrics || [];
   const sources: ResearchSource[] = report.sources || analysis.sources || [];
 
-  const rawEmail = validation.email || report.query;
+  const rawEmail = validation.email || report.query || "target@example.com";
   const displayEmail = isRedacted
     ? rawEmail.replace(/^([^@]{2})[^@]+(@.*)$/, "$1***$2")
     : rawEmail;
+
 
   const score = confidence.score ?? 0;
   const confidenceLevel = confidence.level || "NO_EVIDENCE";
