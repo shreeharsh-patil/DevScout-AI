@@ -69,7 +69,9 @@ export default function EmailIntelligencePage() {
             </div>
 
             <input
-              type="text"
+              type="email"
+              aria-label="Email address to investigate"
+              autoComplete="email"
               placeholder="Enter email address (e.g. developer@company.com)..."
               value={emailInput}
               onChange={(e) => setEmailInput(e.target.value)}

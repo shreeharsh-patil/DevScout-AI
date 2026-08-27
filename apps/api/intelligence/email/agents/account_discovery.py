@@ -1,7 +1,7 @@
 """
-Account Discovery Agent.
+Account Discovery Agent (Phase 5).
 
-Coordinates public account discovery across provider adapters (GitHub, Gravatar, npm, GitLab),
+Coordinates public account discovery across provider adapters (GitHub, Gravatar, npm, GitLab, PyPI, Crates),
 normalizing results and guaranteeing complete error isolation.
 """
 
@@ -12,10 +12,12 @@ from loguru import logger
 from ..models import AccountFinding
 from ..providers import (
     BaseProvider,
+    CratesProvider,
     GitHubProvider,
     GitLabProvider,
     GravatarProvider,
     NpmProvider,
+    PyPIProvider,
 )
 
 
@@ -28,6 +30,8 @@ class AccountDiscoveryAgent:
             GravatarProvider(),
             NpmProvider(),
             GitLabProvider(),
+            PyPIProvider(),
+            CratesProvider(),
         ]
 
     def discover_all(self, email: str, local_part: str, domain: str) -> List[AccountFinding]:
@@ -39,6 +43,6 @@ class AccountDiscoveryAgent:
                 if findings:
                     all_findings.extend(findings)
             except Exception as e:
-                logger.warning(f"[{provider.platform_name}] Unhandled exception in discovery: {e}")
+                logger.warning(f"[{provider.provider_name}] Unhandled exception in discovery: {e}")
 
         return all_findings

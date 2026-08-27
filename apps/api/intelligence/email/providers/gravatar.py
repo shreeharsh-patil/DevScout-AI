@@ -1,5 +1,5 @@
 """
-Gravatar Intelligence Provider.
+Gravatar Intelligence Provider Plugin (Phase 5).
 
 Fetches public Gravatar profiles using cryptographic MD5 / SHA256 hashes.
 Provides verified avatar images, display names, and public bios.
@@ -9,12 +9,50 @@ from __future__ import annotations
 
 import hashlib
 from typing import List
-from ..models import AccountFinding, FindingStatus, Evidence, utc_now_iso
-from .base import BaseProvider
+from ..models import (
+    AccountFinding,
+    EmailTarget,
+    Evidence,
+    FindingStatus,
+    ProviderResult,
+    utc_now_iso,
+)
+from .base import BaseEmailProvider
 
 
-class GravatarProvider(BaseProvider):
-    platform_name: str = "gravatar"
+class GravatarEmailProvider(BaseEmailProvider):
+    provider_name: str = "gravatar"
+
+    def __init__(self, timeout: float = 10.0, max_retries: int = 2):
+        super().__init__(timeout=timeout, max_retries=max_retries)
+
+    def is_available(self) -> bool:
+        return True
+
+    def lookup(self, target: EmailTarget) -> ProviderResult:
+        email = target.normalized_email or target.raw_email
+        findings = self.search(email=email, local_part=target.local_part, domain=target.domain)
+
+        all_evidence: List[Evidence] = []
+        for f in findings:
+            all_evidence.extend(f.evidence)
+
+        verified = [f for f in findings if f.status == FindingStatus.VERIFIED]
+        status = FindingStatus.VERIFIED if verified else FindingStatus.NO_EVIDENCE
+        score = 1.0 if verified else 0.0
+
+        return ProviderResult(
+            provider=self.provider_name,
+            finding_type="account",
+            status=status,
+            confidence_level=status,
+            confidence_score=score,
+            evidence_ids=[e.evidence_id for e in all_evidence],
+            evidence_items=all_evidence,
+            findings=findings,
+            retrieved_at=utc_now_iso(),
+            metadata={"has_verified_gravatar": bool(verified)}
+        )
 
     def search(self, email: str, local_part: str, domain: str) -> List[AccountFinding]:
         findings: List[AccountFinding] = []
@@ -78,6 +116,10 @@ class GravatarProvider(BaseProvider):
                 avatar_url=avatar_url,
                 bio=about_me,
                 method="cryptographic_email_hash_lookup",
+                public_email_match=True,
+                username_match=False,
+                website_match=False,
+                ecosystem_category="profile_avatar",
                 evidence=[evidence],
                 metadata={
                     "md5_hash": md5_hash,
@@ -96,9 +138,17 @@ class GravatarProvider(BaseProvider):
                 confidence_score=0.0,
                 evidence_ids=[],
                 method="cryptographic_email_hash_lookup",
+                public_email_match=False,
+                username_match=False,
+                website_match=False,
+                ecosystem_category="profile_avatar",
                 evidence=[],
                 metadata={"md5_hash": md5_hash, "has_profile": False}
             )
             findings.append(finding)
 
         return findings
+
+
+# Backward-compatible alias
+GravatarProvider = GravatarEmailProvider

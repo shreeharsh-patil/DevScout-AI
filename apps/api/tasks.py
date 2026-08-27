@@ -80,18 +80,48 @@ def execute_research_job(job_id: str, query: str, research_type: str) -> Dict[st
                 stage_db.close()
 
         # ------------------------------------------------------------------
-        # 3. Execute Multi-Agent Pipeline
+        # 3. Lookup Historical Research Snapshot (Same Workspace & Query)
+        # ------------------------------------------------------------------
+        prev_raw = None
+        prev_job_id = None
+        prev_created_at = None
+        try:
+            prev_job = (
+                db.query(Report)
+                .filter(
+                    Report.workspace_id == job.workspace_id,
+                    Report.query == query,
+                    Report.job_id != job_id,
+                    Report.status == "completed"
+                )
+                .order_by(Report.created_at.desc())
+                .first()
+            )
+            if prev_job and prev_job.raw_data:
+                prev_raw = json.loads(prev_job.raw_data)
+                prev_job_id = prev_job.job_id
+                prev_created_at = prev_job.created_at.isoformat() if prev_job.created_at else None
+        except Exception as ex:
+            logger.debug(f"[Worker] Previous snapshot lookup exception: {ex}")
+
+        # ------------------------------------------------------------------
+        # 4. Execute Multi-Agent Pipeline
         # ------------------------------------------------------------------
         result = orchestrator.run_pipeline(
             query=query,
             research_type=research_type,
-            on_stage_change=_update_stage
+            depth="standard",
+            on_stage_change=_update_stage,
+            previous_data=prev_raw,
+            previous_job_id=prev_job_id,
+            previous_created_at=prev_created_at
         )
 
         # Refresh job instance
         job = db.query(Report).filter(Report.job_id == job_id).first()
         if not job:
             return {"status": "error", "message": "Job disappeared during execution"}
+
 
         if result.get("status") == "completed":
             job.status = "completed"

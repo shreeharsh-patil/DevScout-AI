@@ -2,15 +2,16 @@
 Identity Resolver Agent.
 
 Correlates and synthesizes cross-platform public signals (names, bios, avatars, websites, orgs)
-while strictly isolating candidate guesses and annotating identity ambiguity.
+while strictly isolating candidate guesses, role-based accounts, and annotating identity ambiguity.
 """
 
 from __future__ import annotations
 
-from typing import List
+from typing import List, Optional
 from .models import (
     AccountFinding,
     DeveloperFootprint,
+    EmailTarget,
     FindingStatus,
     IdentityFinding,
     UsernameCandidate,
@@ -27,7 +28,8 @@ class IdentityResolverAgent:
         domain: str,
         account_findings: List[AccountFinding],
         footprint: DeveloperFootprint,
-        username_candidates: List[UsernameCandidate]
+        username_candidates: List[UsernameCandidate],
+        target: Optional[EmailTarget] = None
     ) -> IdentityFinding:
         possible_names: List[str] = []
         possible_usernames: List[str] = []
@@ -38,6 +40,14 @@ class IdentityResolverAgent:
         public_bios: List[str] = []
         avatars: List[str] = []
         evidence_ids: List[str] = []
+
+        is_role = target.is_role_account if target else False
+        role_type = target.role_type if target else None
+
+        if target and target.organization_name and target.organization_name not in organizations:
+            organizations.append(target.organization_name)
+        if target and target.website_url and target.website_url not in websites:
+            websites.append(target.website_url)
 
         verified_findings = [a for a in account_findings if a.status == FindingStatus.VERIFIED]
         target_findings = verified_findings if verified_findings else account_findings
@@ -81,21 +91,27 @@ class IdentityResolverAgent:
             if cand.username not in possible_usernames:
                 possible_usernames.append(cand.username)
 
+        # Do NOT synthesize personal name if this is a role-based mailbox
         resolved_name = possible_names[0] if possible_names else None
-        if not resolved_name and "." in local_part:
+        if not resolved_name and not is_role and "." in local_part:
             parts = local_part.split(".")
             if len(parts) == 2 and all(p.isalpha() for p in parts):
                 resolved_name = f"{parts[0].capitalize()} {parts[1].capitalize()}"
 
         ambiguity_note = None
-        if len(possible_names) > 2:
+        if is_role:
+            ambiguity_note = (
+                f"Target email is a role-based / department mailbox ({role_type or 'generic role'}), "
+                "not an individual personal identity. Associated signals reflect corporate / team presence."
+            )
+        elif len(possible_names) > 2:
             ambiguity_note = (
                 f"Multiple distinct names ({', '.join(possible_names[:3])}) were returned across candidate accounts. "
                 "Treat identity correlation with caution."
             )
 
-        status = FindingStatus.VERIFIED if verified_findings else FindingStatus.PROBABLE if possible_names else FindingStatus.CANDIDATE
-        score = 1.0 if verified_findings else 0.60 if possible_names else 0.25
+        status = FindingStatus.VERIFIED if verified_findings else FindingStatus.PROBABLE if (possible_names or organizations) else FindingStatus.CANDIDATE
+        score = 1.0 if verified_findings else 0.60 if (possible_names or organizations) else 0.25
 
         return IdentityFinding(
             provider="identity_resolver",
@@ -113,5 +129,6 @@ class IdentityResolverAgent:
             locations=locations,
             public_bios=public_bios[:3],
             avatars=avatars[:4],
-            ambiguity_note=ambiguity_note
+            ambiguity_note=ambiguity_note,
+            metadata={"is_role_account": is_role, "role_type": role_type}
         )

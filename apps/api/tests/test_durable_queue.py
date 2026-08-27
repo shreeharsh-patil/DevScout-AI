@@ -91,7 +91,7 @@ class TestDurableQueueAndWorker:
 
         stages_recorded = []
 
-        def mock_run_pipeline(query, research_type, on_stage_change=None):
+        def mock_run_pipeline(query, research_type, on_stage_change=None, **kwargs):
             if on_stage_change:
                 on_stage_change("researching")
                 stages_recorded.append("researching")
@@ -139,8 +139,9 @@ class TestDurableQueueAndWorker:
         finally:
             db.close()
 
-        def mock_failing_pipeline(query, research_type, on_stage_change=None):
+        def mock_failing_pipeline(query, research_type, on_stage_change=None, **kwargs):
             raise ConnectionError("External API connection timed out")
+
 
         with patch("tasks.orchestrator.run_pipeline", side_effect=mock_failing_pipeline):
             result = execute_research_job(job_id, "bad_query", "developer")

@@ -539,6 +539,15 @@ export default function HistoryPage() {
                     transition={{ delay: i * 0.03 }}
                     className="group bg-neutral-900/30 hover:bg-neutral-900/60 border border-neutral-800 hover:border-neutral-700 rounded-xl p-4 transition-all cursor-pointer"
                     onClick={() => setSelectedItem(item)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        setSelectedItem(item);
+                      }
+                    }}
+                    role="button"
+                    tabIndex={0}
+                    aria-label={`View report for ${item.query}`}
                   >
                     {/* Mobile layout */}
                     <div className="md:hidden flex flex-col gap-2">

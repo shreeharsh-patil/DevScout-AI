@@ -86,7 +86,8 @@ class ResearchRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     query: str = Field(min_length=1, max_length=500)
     type: str = Field(pattern=r"^[a-z][a-z0-9_-]{1,31}$")
-    depth: str = Field(default="standard", pattern=r"^(standard)$")
+    depth: str = Field(default="standard", pattern=r"^(quick|standard|deep)$")
+
 
 
     @field_validator("type")
@@ -552,7 +553,48 @@ async def get_job_status(
     }
 
 
+@app.get("/api/v1/research/{job_id}/graph")
+@app.get("/research/{job_id}/graph")
+async def get_research_graph(
+    job_id: str,
+    auth: tuple[User, Workspace] = Depends(get_current_auth),
+    db: Session = Depends(get_db)
+):
+    """Returns the structured Evidence Graph for the research job."""
+    user, workspace = auth
+    job = db.query(Report).filter(Report.job_id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    verify_report_access(job, user, workspace, db)
+
+    raw_data = {}
+    if job.raw_data:
+        try:
+            raw_data = json.loads(job.raw_data)
+        except Exception:
+            raw_data = {}
+
+    analysis = raw_data.get("analysis") or raw_data
+    graph = analysis.get("evidence_graph") or analysis.get("footprint", {}).get("evidence_graph")
+
+    if not graph:
+        return {
+            "nodes": [
+                {"id": f"email:{job.query}", "label": job.query, "node_type": "email", "status": "verified", "confidence": 1.0, "sources": []}
+            ],
+            "edges": [],
+            "summary": f"Evidence graph for query '{job.query}'",
+            "verification_tier": "NO_EVIDENCE",
+            "confidence_score": 0.0,
+            "total_nodes": 1,
+            "total_edges": 0
+        }
+
+    return graph
+
+
 @app.get("/api/v1/history")
+
 async def get_history(
     auth: tuple[User, Workspace] = Depends(get_current_auth),
     db: Session = Depends(get_db)
@@ -694,3 +736,108 @@ async def delete_job(
     db.delete(job)
     db.commit()
     return {"message": "Job deleted successfully", "job_id": job_id}
+
+
+# ---------------------------------------------------------------------------
+# Phase 19: Export and Shareable Reports Endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/api/v1/research/{job_id}/export")
+@app.get("/research/{job_id}/export")
+async def export_research_report(
+    job_id: str,
+    format: str = "json",
+    hide_email: bool = False,
+    hide_breaches: bool = False,
+    hide_candidates: bool = False,
+    auth: tuple[User, Workspace] = Depends(get_current_auth),
+    db: Session = Depends(get_db)
+):
+    """Exports structured intelligence (JSON or Markdown) with optional redaction options."""
+    user, workspace = auth
+    job = db.query(Report).filter(Report.job_id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    verify_report_access(job, user, workspace, db)
+
+    raw_data = {}
+    if job.raw_data:
+        try:
+            raw_data = json.loads(job.raw_data)
+        except Exception:
+            raw_data = {}
+
+    analysis = raw_data.get("analysis") or raw_data
+
+    # Apply redaction filters if requested
+    if hide_email and "email" in analysis:
+        parts = analysis["email"].split("@")
+        analysis["email"] = f"{parts[0][:2]}***@{parts[1]}" if len(parts) == 2 else "***@domain.com"
+    if hide_breaches and "breaches" in analysis:
+        analysis["breaches"] = []
+    if hide_candidates and "username_candidates" in analysis:
+        analysis["username_candidates"] = []
+
+    if format.lower() == "markdown":
+        md_text = job.report_markdown or ""
+        if hide_email and job.query:
+            md_text = md_text.replace(job.query, "***@domain.com")
+        return Response(content=md_text, media_type="text/markdown", headers={"Content-Disposition": f"attachment; filename=report_{job_id}.md"})
+
+    return {
+        "job_id": job.job_id,
+        "query": "***@domain.com" if hide_email else job.query,
+        "research_type": job.research_type,
+        "status": job.status,
+        "created_at": job.created_at.isoformat() if job.created_at else None,
+        "intelligence": analysis,
+        "sources": json.loads(job.sources) if job.sources else []
+    }
+
+
+@app.post("/api/v1/research/{job_id}/share")
+async def create_shareable_link(
+    job_id: str,
+    auth: tuple[User, Workspace] = Depends(get_current_auth),
+    db: Session = Depends(get_db)
+):
+    """Generates an authorized shareable token for external view."""
+    user, workspace = auth
+    job = db.query(Report).filter(Report.job_id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    verify_report_access(job, user, workspace, db)
+
+    import uuid
+    share_token = "share_" + uuid.uuid4().hex[:16]
+    return {
+        "job_id": job.job_id,
+        "share_token": share_token,
+        "share_url": f"/report/share/{share_token}",
+        "is_shareable": True
+    }
+
+
+# ---------------------------------------------------------------------------
+# Phase 22: Observability & Diagnostics
+# ---------------------------------------------------------------------------
+
+@app.get("/api/v1/diagnostics")
+async def get_system_diagnostics(
+    auth: tuple[User, Workspace] = Depends(get_current_auth),
+    db: Session = Depends(get_db)
+):
+    """Returns platform reliability telemetry, provider metrics, and cache statistics."""
+    from intelligence.email.telemetry import default_cache, default_telemetry
+
+    queue_health = get_queue_health()
+    cache_stats = default_cache.stats
+    telemetry_summary = default_telemetry.get_summary()
+
+    return {
+        "status": "healthy",
+        "queue": queue_health,
+        "cache": cache_stats,
+        "telemetry": telemetry_summary
+    }
+

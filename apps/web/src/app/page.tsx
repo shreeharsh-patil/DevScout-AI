@@ -291,6 +291,7 @@ export default function OnePageApp() {
                   <Search className="w-5 h-5 text-neutral-500 shrink-0" />
                   <input
                     type="text"
+                    aria-label="Research target"
                     placeholder={placeholder}
                     className="w-full min-w-0 bg-transparent border-none outline-none text-white placeholder:text-neutral-600 py-3 transition-all"
                     value={query}
@@ -357,17 +358,18 @@ export default function OnePageApp() {
             </p>
             <h2 className="text-3xl font-bold">From email to identity. Every signal covered.</h2>
           </div>
-          <div className="overflow-x-auto sm:overflow-visible">
-            <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-4 gap-4 min-w-[640px] sm:min-w-0">
+          <div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               {FEATURES.map((f, i) => (
-                <motion.div
+                <motion.button
+                  type="button"
                   key={i}
                   whileHover={{ y: -5 }}
                   onClick={() => {
                     handleSelectQuery(f.example);
                     document.getElementById("dashboard")?.scrollIntoView({ behavior: "smooth" });
                   }}
-                  className="p-5 bg-neutral-900/40 border border-neutral-800 rounded-2xl cursor-pointer hover:border-neutral-700 transition-all"
+                  className="p-5 bg-neutral-900/40 border border-neutral-800 rounded-2xl cursor-pointer hover:border-neutral-700 transition-all text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
                 >
                   <div className="w-9 h-9 bg-neutral-950 rounded-lg flex items-center justify-center mb-3 border border-neutral-800">
                     {f.icon}
@@ -377,7 +379,7 @@ export default function OnePageApp() {
                   <code className="text-[10px] text-neutral-600 bg-neutral-900 px-2 py-1 rounded">
                     {f.example}
                   </code>
-                </motion.div>
+                </motion.button>
               ))}
             </div>
           </div>
@@ -409,9 +411,10 @@ export default function OnePageApp() {
                 <CardContent className="space-y-5">
                   {/* Smart input */}
                   <div className="space-y-2">
-                    <Label className="text-neutral-400">Target Input</Label>
+                    <Label htmlFor="target-input" className="text-neutral-400">Target Input</Label>
                     <div className="relative">
                       <Input
+                        id="target-input"
                         className="bg-neutral-900 border-neutral-800 pr-10"
                         placeholder="someone@gmail.com"
                         value={query}

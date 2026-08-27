@@ -25,9 +25,13 @@ class AgentOrchestrator:
         self,
         query: str,
         research_type: str,
-        on_stage_change: Optional[Callable[[str], None]] = None
+        depth: str = "standard",
+        on_stage_change: Optional[Callable[[str], None]] = None,
+        previous_data: Optional[Dict] = None,
+        previous_job_id: Optional[str] = None,
+        previous_created_at: Optional[str] = None
     ) -> Dict:
-        logger.info("orchestrator_pipeline_started", research_type=research_type)
+        logger.info("orchestrator_pipeline_started", research_type=research_type, depth=depth)
         
         def _notify_stage(stage: str):
             if on_stage_change:
@@ -58,9 +62,9 @@ class AgentOrchestrator:
                 sc.add_source(
                     title=f"Startup Website: {query}",
                     url=query if query.startswith("http") else f"https://{query}",
-                    platform="web",
-                    source_type="web_page",
-                    snippet=web_text[:300] if web_text else "Website content fetched."
+                    platform="startup",
+                    source_type="website_content",
+                    snippet=web_text[:250] if web_text else ""
                 )
                 raw_data = {"website_text": web_text, "sources": sc.get_sources()}
                 _notify_stage("analyzing")
@@ -71,8 +75,14 @@ class AgentOrchestrator:
 
             elif research_type in ("email_intelligence", "email"):
                 from intelligence.email import EmailIntelligenceOrchestrator
-                email_orch = EmailIntelligenceOrchestrator(on_stage_change=_notify_stage)
-                intel_result = email_orch.execute(query)
+                email_orch = EmailIntelligenceOrchestrator(on_progress=lambda stg, pct: _notify_stage(stg))
+                intel_result = email_orch.execute(
+                    query,
+                    depth=depth,
+                    previous_data=previous_data,
+                    previous_job_id=previous_job_id,
+                    previous_created_at=previous_created_at
+                )
                 raw_data = intel_result.model_dump()
                 analysis = {
                     "email": intel_result.email,
@@ -84,10 +94,14 @@ class AgentOrchestrator:
                     "breaches": [b.model_dump() for b in intel_result.breaches],
                     "username_candidates": [u.model_dump() for u in intel_result.username_candidates],
                     "identity_signals": intel_result.identity_signals.model_dump(),
+                    "identity_clusters": [c.model_dump() for c in intel_result.identity_clusters],
+                    "evidence_graph": intel_result.evidence_graph.model_dump() if intel_result.evidence_graph else None,
+                    "reputation": intel_result.reputation.model_dump() if intel_result.reputation else None,
+                    "historical_comparison": intel_result.historical_comparison.model_dump() if intel_result.historical_comparison else None,
+                    "scope": intel_result.scope.model_dump() if intel_result.scope else None,
                     "sources": intel_result.sources
                 }
                 report = intel_result.report_markdown
-
 
             elif research_type == "youtube":
                 raw_data = self.researcher.fetch_youtube_info(query)

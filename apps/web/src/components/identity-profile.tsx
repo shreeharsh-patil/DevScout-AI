@@ -17,6 +17,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { safeExternalUrl } from "@/lib/utils";
 
 function GithubIcon({ className }: { className?: string }) {
   return (
@@ -147,7 +148,7 @@ export default function IdentityProfile({ analysis, researcher }: Props) {
                 {/* Dynamic OSINT avatars cannot use a fixed Next.js remote host allowlist. */}
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
-                  src={gravatar.avatar_url}
+                  src={safeExternalUrl(gravatar.avatar_url)}
                   alt="Avatar"
                   className="w-20 h-20 rounded-full border-2 border-indigo-500/30 object-cover shrink-0"
                 />
@@ -229,7 +230,7 @@ export default function IdentityProfile({ analysis, researcher }: Props) {
               <div>
                 <p className="text-xs text-neutral-500 mb-1">Associated URLs:</p>
                 {gravatar.urls.map((url, i) => (
-                  <a key={i} href={url} target="_blank" rel="noopener noreferrer"
+                  <a key={i} href={safeExternalUrl(url)} target="_blank" rel="noopener noreferrer"
                     className="flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300 mb-0.5">
                     <ExternalLink className="w-3 h-3 shrink-0" /> {url}
                   </a>
@@ -237,7 +238,7 @@ export default function IdentityProfile({ analysis, researcher }: Props) {
               </div>
             )}
             {gravatar.profile_url && (
-              <a href={gravatar.profile_url} target="_blank" rel="noopener noreferrer"
+              <a href={safeExternalUrl(gravatar.profile_url)} target="_blank" rel="noopener noreferrer"
                 className="inline-flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300 mt-2">
                 View Full Profile <ExternalLink className="w-3 h-3" />
               </a>
@@ -260,7 +261,7 @@ export default function IdentityProfile({ analysis, researcher }: Props) {
               <div key={i} className="flex items-center gap-2">
                 <span className="text-xs font-medium text-neutral-400 w-28 shrink-0">{sp.platform}:</span>
                 {sp.url ? (
-                  <a href={sp.url} target="_blank" rel="noopener noreferrer"
+                  <a href={safeExternalUrl(sp.url)} target="_blank" rel="noopener noreferrer"
                     className="text-xs text-indigo-400 hover:text-indigo-300 truncate flex items-center gap-1">
                     {sp.title || sp.url} <ExternalLink className="w-2.5 h-2.5 shrink-0" />
                   </a>
@@ -293,7 +294,7 @@ export default function IdentityProfile({ analysis, researcher }: Props) {
                   {acc.avatar_url ? (
                     <>
                       {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={acc.avatar_url} alt="" className="w-8 h-8 rounded-full mt-0.5" />
+                      <img src={safeExternalUrl(acc.avatar_url)} alt="" className="w-8 h-8 rounded-full mt-0.5" />
                     </>
                   ) : (
                     <div className="w-8 h-8 rounded-full bg-neutral-800 flex items-center justify-center mt-0.5">
@@ -302,7 +303,7 @@ export default function IdentityProfile({ analysis, researcher }: Props) {
                   )}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <a href={acc.profile_url || `https://github.com/${acc.login}`}
+                      <a href={safeExternalUrl(acc.profile_url || `https://github.com/${encodeURIComponent(acc.login)}`)}
                         target="_blank" rel="noopener noreferrer"
                         className="text-sm font-medium text-indigo-400 hover:text-indigo-300 truncate">
                         {acc.login}
@@ -409,7 +410,7 @@ export default function IdentityProfile({ analysis, researcher }: Props) {
             {webMentions.map((wm, i) => (
               <div key={i} className="text-sm">
                 {wm.url ? (
-                  <a href={wm.url} target="_blank" rel="noopener noreferrer"
+                  <a href={safeExternalUrl(wm.url)} target="_blank" rel="noopener noreferrer"
                     className="text-indigo-400 hover:text-indigo-300 flex items-center gap-1">
                     {wm.title || wm.url} <ExternalLink className="w-3 h-3 shrink-0" />
                   </a>
