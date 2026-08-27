@@ -1112,7 +1112,8 @@ class AnalyzerAgent:
                 if pct >= 1:  # Only include languages with >= 1% of codebase
                     tech_stack.append({"language": lang, "percentage": round(pct, 1), "bytes": bytes_count})
 
-        # ── Contribution distribution �n        contrib_summary = []
+        # ── Contribution distribution summary ──
+        contrib_summary = []
         if contributors:
             total_contributions = sum(c.get("contributions", 0) for c in contributors)
             for c in contributors[:10]:

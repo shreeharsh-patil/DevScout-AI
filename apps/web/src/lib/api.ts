@@ -179,6 +179,8 @@ export interface ResearchRequest {
   depth?: string;
 }
 
+import type { ResearchSource } from "@/types/research";
+
 export interface ResearchResponse {
   job_id: string;
   status: string;
@@ -187,12 +189,16 @@ export interface ResearchResponse {
 export interface JobStatusResponse {
   job_id: string;
   status: string;
+  stage?: string;
   report?: string;
   report_markdown?: string;
   raw_data?: Record<string, unknown>;
+  sources?: ResearchSource[];
   research_type?: string;
   error?: string;
   message?: string;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface HistoryItem {
@@ -208,9 +214,12 @@ export interface ReportResponse {
   query: string;
   research_type: string;
   status: string;
+  stage?: string;
   report_markdown?: string;
+  sources?: ResearchSource[];
   created_at: string;
 }
+
 
 // ---------------------------------------------------------------------------
 // Public API

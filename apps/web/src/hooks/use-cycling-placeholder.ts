@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 
 const PLACEHOLDERS = [
+  "vercel/next.js",
   "someone@gmail.com",
   "john.doe@company.com",
   "sarah@startup.io",

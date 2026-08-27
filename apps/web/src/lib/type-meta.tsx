@@ -79,6 +79,12 @@ export const TYPE_META: Record<string, TypeMeta> = {
     color: "text-rose-400 border-rose-500/30 bg-rose-500/5",
     bg: "bg-rose-500/10",
   },
+  repository: {
+    label: "Repository Intelligence",
+    icon: <GitBranch className="w-3 h-3" />,
+    color: "text-violet-400 border-violet-500/30 bg-violet-500/5",
+    bg: "bg-violet-500/10",
+  },
 };
 
 export const STATUS_META: Record<string, StatusMeta> = {
@@ -162,4 +168,5 @@ export const ALL_RESEARCH_TYPES = [
   { value: "social", label: "Social Tracker" },
   { value: "linkedin", label: "LinkedIn Intel" },
   { value: "npm", label: "npm Analyzer" },
+  { value: "repository", label: "Repository Intelligence" },
 ] as const;

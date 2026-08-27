@@ -55,8 +55,8 @@ export function detectQueryType(raw: string): DetectionMeta | null {
     /^[a-z0-9_-]+\/[a-z0-9_.-]{1,100}$/.test(q)
   ) {
     return {
-      type: "github-repo",
-      label: "Repo Analyzer",
+      type: "repository",
+      label: "Repository Intelligence",
       confidence: "GitHub Repository Detected",
       color: REPO_COLOR,
     };

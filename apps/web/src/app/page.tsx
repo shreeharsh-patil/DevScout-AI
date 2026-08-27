@@ -42,7 +42,9 @@ import MarkdownReport from "@/components/reports/markdown-report";
 import ScoreRing from "@/components/reports/score-ring";
 import SwotGrid from "@/components/reports/swot-grid";
 import CopyButton from "@/components/reports/copy-button";
+import { SourcesPanel } from "@/components/reports/sources-panel";
 import ResearchProgress from "@/components/research/research-progress";
+
 import ErrorState from "@/components/research/error-state";
 import RateLimitAlert from "@/components/research/rate-limit-alert";
 import HistoryPreview from "@/components/research/history-preview";
@@ -68,6 +70,12 @@ function LinkedinIcon({ className }: { className?: string }) {
 
 // ─── Feature card data ───────────────────────────────────────────────────────
 const FEATURES = [
+  {
+    icon: <GitBranch className="w-5 h-5 text-violet-400" />,
+    title: "Repository Intelligence",
+    desc: "Paste a GitHub repo URL. Get health score, tech stack, contributors & risks.",
+    example: "vercel/next.js",
+  },
   {
     icon: <Mail className="w-5 h-5 text-orange-400" />,
     title: "Email Identity Intel",
@@ -131,10 +139,10 @@ const FEATURES = [
 ];
 
 const EXAMPLE_HINTS = [
+  "vercel/next.js",
   "someone@gmail.com",
   "john.doe@company.com",
   "contact@startup.io",
-  "github.com/torvalds",
 ];
 
 // ─── Main Component ───────────────────────────────────────────────────────────
@@ -160,10 +168,10 @@ export default function OnePageApp() {
     setManualType("auto");
   }, []);
 
-  // Score for developer / idea / github-repo reports
+  // Score for developer / idea / github-repo / repository reports
   const score =
     report?.report &&
-    (activeType === "developer" || activeType === "idea" || activeType === "github-repo")
+    (activeType === "developer" || activeType === "idea" || activeType === "github-repo" || activeType === "repository")
       ? parseScore(report.report)
       : null;
 
@@ -185,17 +193,17 @@ export default function OnePageApp() {
               variant="outline"
               className="mb-4 border-indigo-500/30 text-indigo-400 bg-indigo-500/5 px-3 py-1"
             >
-              <Sparkles className="w-3 h-3 mr-1" /> Identity Intelligence &amp; OSINT Platform
+              <Sparkles className="w-3 h-3 mr-1" /> Developer &amp; Repository Intelligence
             </Badge>
             <h2 className="text-5xl md:text-8xl font-extrabold tracking-tight mb-6 leading-[1.1]">
-              See Who&apos;s Behind <br />
+              Understand Any <br />
               <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 via-white to-emerald-400">
-                Any Email Address.
+                Open Source Project.
               </span>
             </h2>
             <p className="text-xl text-neutral-400 max-w-2xl mx-auto mb-10 leading-relaxed">
-              Surface public profiles, social media accounts, data breaches, and digital footprints.
-              Enter an email to build a complete identity intelligence profile.
+              Paste a GitHub repository URL or owner/repo slug. Get a transparent health score,
+              tech stack analysis, contributor insights, and risk assessment.
             </p>
           </motion.div>
 
@@ -477,7 +485,7 @@ export default function OnePageApp() {
                       <div className="mb-6 bg-neutral-900/40 border border-neutral-800 rounded-2xl overflow-hidden">
                         <ScoreRing
                           score={score}
-                          label={activeType === "developer" ? "Dev Score" : "Viability"}
+                          label={activeType === "developer" ? "Dev Score" : activeType === "repository" ? "Repository Score" : "Viability"}
                         />
                       </div>
                     )}
@@ -527,8 +535,19 @@ export default function OnePageApp() {
                         </CardContent>
                       </Card>
                     )}
+
+                    {/* Normalized Sources Explorer */}
+                    <SourcesPanel
+                      sources={
+                        report.sources ||
+                        (report.raw_data as any)?.sources ||
+                        (report.raw_data as any)?.researcher?.sources ||
+                        (report.raw_data as any)?.analysis?.sources
+                      }
+                    />
                   </motion.div>
                 )}
+
 
                 {status === "idle" && (
                   <motion.div key="idle" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>

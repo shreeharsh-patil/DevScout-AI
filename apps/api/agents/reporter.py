@@ -476,4 +476,15 @@ class ReporterAgent:
             md_content += "Report generation for this type is not yet implemented.\n"
             md_content += str(analysis)
 
+        # ── Normalized Sources & Evidence Section ──
+        sources = analysis.get("sources", [])
+        if sources and isinstance(sources, list) and len(sources) > 0:
+            from sources import SourceCollector
+            collector = SourceCollector()
+            collector.extend(sources)
+            sources_md = collector.format_markdown_sources_section()
+            if sources_md:
+                md_content += "\n\n" + sources_md + "\n"
+
         return md_content
+

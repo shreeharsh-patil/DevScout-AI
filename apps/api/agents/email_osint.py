@@ -156,7 +156,83 @@ class EmailOSINT:
 
         results["profile_completeness"] = self._compute_completeness(results)
         results["confidence_category"] = results["profile_completeness"]["confidence_category"]
+
+        # Collect normalized sources
+        from sources import SourceCollector
+        collector = SourceCollector()
+
+        # 1. Gravatar
+        if results.get("gravatar", {}).get("has_profile"):
+            collector.add_source(
+                title=f"Gravatar Profile: {results['gravatar'].get('display_name') or email}",
+                url=results["gravatar"].get("profile_url") or f"https://gravatar.com/{hashlib.md5(email.strip().lower().encode()).hexdigest()}",
+                platform="gravatar",
+                source_type="avatar_registry",
+                snippet=results["gravatar"].get("evidence", "Verified MD5 Gravatar profile match.")
+            )
+
+        # 2. WHOIS
+        if results.get("whois", {}).get("has_data"):
+            collector.add_source(
+                title=f"RDAP WHOIS Domain Registry: {domain}",
+                url=f"https://rdap.org/domain/{domain}",
+                platform="whois",
+                source_type="dns_whois",
+                snippet=results["whois"].get("evidence", f"Domain registration record for {domain}.")
+            )
+
+        # 3. Breaches
+        for b in results.get("breaches", []):
+            collector.add_source(
+                title=f"Breach Record: {b.get('name', 'Breach')}",
+                url=f"https://haveibeenpwned.com/PwnedWebsites#{b.get('name', '')}",
+                platform="hibp",
+                source_type="breach_dump",
+                snippet=b.get("evidence", f"Exposed in {b.get('name')} breach.")
+            )
+
+        # 4. GitHub confirmed & candidate accounts
+        for acc in results.get("github", {}).get("confirmed_accounts", []):
+            collector.add_source(
+                title=f"GitHub Profile (Confirmed): {acc['login']}",
+                url=acc.get("profile_url") or f"https://github.com/{acc['login']}",
+                platform="github",
+                source_type="user_profile",
+                snippet=acc.get("evidence", "Confirmed GitHub account match.")
+            )
+        for acc in results.get("github", {}).get("candidate_accounts", []):
+            collector.add_source(
+                title=f"GitHub Candidate Lead (Unverified): {acc['login']}",
+                url=acc.get("profile_url") or f"https://github.com/{acc['login']}",
+                platform="github",
+                source_type="candidate_lead",
+                snippet=acc.get("evidence", "Inferred handle; unverified.")
+            )
+
+        # 5. PGP
+        if results.get("pgp_keys", {}).get("found"):
+            collector.add_source(
+                title=f"OpenPGP Keyserver: {email}",
+                url=f"https://keys.openpgp.org/search?q={requests.utils.quote(email)}",
+                platform="openpgp",
+                source_type="cryptographic_keyserver",
+                snippet=results["pgp_keys"].get("evidence", "Public PGP key found.")
+            )
+
+        # 6. Web Mentions
+        for wm in results.get("web_mentions", [])[:5]:
+            if isinstance(wm, dict) and wm.get("url"):
+                collector.add_source(
+                    title=wm.get("title") or "Web Mention",
+                    url=wm.get("url", ""),
+                    platform="web",
+                    source_type="search_result",
+                    snippet=wm.get("snippet", "")
+                )
+
+        results["sources"] = collector.get_sources()
         return results
+
 
     def _compute_completeness(self, data: Dict) -> Dict:
         """

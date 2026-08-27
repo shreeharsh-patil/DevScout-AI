@@ -12,7 +12,8 @@ export type ResearchType =
   | "linkedin"
   | "npm"
   | "hackernews"
-  | "github-repo";
+  | "github-repo"
+  | "repository";
 
 export type ResearchStatus = "idle" | "loading" | "success" | "error" | "rate_limited";
 
@@ -25,6 +26,18 @@ export interface DetectionResult {
   color: string;
 }
 
+// ─── Source / Evidence Verification ──────────────────────────────────────────
+export interface ResearchSource {
+  source_id: string;
+  title: string;
+  url: string;
+  platform: string;
+  retrieved_at: string;
+  source_type: string;
+  snippet?: string;
+  metadata?: Record<string, unknown>;
+}
+
 // ─── API response shapes ─────────────────────────────────────────────────────
 export interface ResearchJob {
   job_id: string;
@@ -34,8 +47,11 @@ export interface ResearchJob {
 export interface ResearchReport {
   job_id: string;
   status: string;
+  stage?: string;
   research_type?: string;
   report?: string;
+  report_markdown?: string;
+  sources?: ResearchSource[];
   raw_data?: {
     analysis?: Record<string, unknown>;
     researcher?: Record<string, unknown>;
@@ -57,11 +73,14 @@ export interface FullReport {
   query: string;
   research_type: string;
   status: string;
+  stage?: string;
   report?: string;
   report_markdown?: string;
+  sources?: ResearchSource[];
   error?: string;
   created_at: string;
 }
+
 
 // ─── Metadata maps ───────────────────────────────────────────────────────────
 export interface TypeMeta {

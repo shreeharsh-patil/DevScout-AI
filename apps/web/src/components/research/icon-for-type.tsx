@@ -25,6 +25,7 @@ import {
   npm: <Package className="w-4 h-4" />,
   hackernews: <TrendingUp className="w-4 h-4" />,
   "github-repo": <GitBranch className="w-4 h-4" />,
+  repository: <GitBranch className="w-4 h-4" />,
 };
 
 interface IconForTypeProps {

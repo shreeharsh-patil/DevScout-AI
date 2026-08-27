@@ -95,6 +95,7 @@ class Report(Base):
     # New fields
     error_message = Column(Text, nullable=True)
     stage = Column(String(32), nullable=True, default="pending")
+    sources = Column(Text, nullable=True)
 
     created_at = Column(
         DateTime, nullable=False, default=_utc_now,
@@ -146,8 +147,11 @@ def ensure_tables() -> None:
                         conn.execute(text("ALTER TABLE reports ADD COLUMN stage VARCHAR(32) DEFAULT 'pending'"))
                     if "updated_at" not in columns:
                         conn.execute(text("ALTER TABLE reports ADD COLUMN updated_at TIMESTAMP"))
+                    if "sources" not in columns:
+                        conn.execute(text("ALTER TABLE reports ADD COLUMN sources TEXT"))
                     conn.commit()
         except Exception:
             pass
+
 
 

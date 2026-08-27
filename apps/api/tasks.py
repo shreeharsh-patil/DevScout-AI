@@ -102,11 +102,13 @@ def execute_research_job(job_id: str, query: str, research_type: str) -> Dict[st
                 "researcher": result.get("raw_data"),
                 "analysis": result.get("analysis")
             })
+            job.sources = json.dumps(result.get("sources", []))
             job.error_message = None
             job.updated_at = datetime.datetime.now(datetime.timezone.utc)
             db.commit()
-            logger.info(f"[Worker] Job {job_id} successfully completed.")
+            logger.info(f"[Worker] Job {job_id} successfully completed with {len(result.get('sources', []))} sources.")
             return {"status": "completed", "job_id": job_id}
+
 
         elif result.get("status") == "rate_limited":
             err_msg = result.get("error", "Rate limit hit. Waiting before retry.")

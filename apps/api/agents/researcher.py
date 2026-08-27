@@ -1,12 +1,16 @@
 import subprocess
 import json
 import time
+import re
 import requests
 from loguru import logger
 import os
 from dotenv import load_dotenv
 
+from sources import SourceCollector
+
 load_dotenv()
+
 
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")  # Optional: raises rate limit from 60 to 5000 req/hr
 
@@ -111,9 +115,33 @@ class ResearcherAgent:
             )
             repo_data = repo_resp.json() if repo_resp.status_code == 200 else []
             
+            collector = SourceCollector()
+            collector.add_source(
+                title=f"GitHub Profile: {handle}",
+                url=user_data.get("html_url") or f"https://github.com/{handle}",
+                platform="github",
+                source_type="user_profile",
+                snippet=f"{user_data.get('name', handle)}: {user_data.get('bio', 'No bio provided.')}"
+            )
+            collector.add_source(
+                title=f"GitHub User API Endpoint: {handle}",
+                url=f"https://api.github.com/users/{handle}",
+                platform="github",
+                source_type="rest_api",
+                snippet=f"Public repositories: {user_data.get('public_repos', 0)}, Followers: {user_data.get('followers', 0)}"
+            )
+            collector.add_source(
+                title=f"GitHub Repositories List: {handle}",
+                url=f"https://api.github.com/users/{handle}/repos?sort=updated&per_page=10",
+                platform="github",
+                source_type="rest_api",
+                snippet=f"Fetched top {len(repo_data)} recent repositories."
+            )
+
             result = {
                 "profile": user_data,
-                "recent_repos": repo_data
+                "recent_repos": repo_data,
+                "sources": collector.get_sources()
             }
             _cache_set(_github_profile_cache, handle, result)
             return result
@@ -140,6 +168,23 @@ class ResearcherAgent:
                 data = json.loads(result.stdout)
                 # Check for transcript availability
                 data["_has_transcript"] = bool(data.get("subtitles") or data.get("automatic_captions"))
+                
+                collector = SourceCollector()
+                collector.add_source(
+                    title=f"YouTube Video: {data.get('title', 'Video')}",
+                    url=url,
+                    platform="youtube",
+                    source_type="video_stream",
+                    snippet=f"Uploader: {data.get('uploader', 'Unknown')} | Views: {data.get('view_count', 0):,} | Description: {data.get('description', '')[:200]}"
+                )
+                if data.get("uploader_url") or data.get("channel_url"):
+                    collector.add_source(
+                        title=f"YouTube Channel: {data.get('uploader', 'Channel')}",
+                        url=data.get("uploader_url") or data.get("channel_url", ""),
+                        platform="youtube",
+                        source_type="channel_profile"
+                    )
+                data["sources"] = collector.get_sources()
                 return data
             
             logger.error(f"yt-dlp failed: {result.stderr}")
@@ -147,6 +192,7 @@ class ResearcherAgent:
         except Exception as e:
             logger.error(f"YouTube info fetch failed: {e}")
             return {}
+
 
     def fetch_stack_overflow_user(self, email: str) -> dict:
         """Searches for a Stack Overflow user by email hash (MD5)."""
@@ -256,6 +302,28 @@ class ResearcherAgent:
         if github_text.get("items"):
             gh_summary = "\n".join([f"• {r['full_name']} ({r['stargazers_count']}⭐): {r['description']}" for r in github_text['items'][:3]])
 
+        collector = SourceCollector()
+        collector.add_source(
+            title=f"Reddit Search API: {keyword}",
+            url=f"https://www.reddit.com/search.json?q={requests.utils.quote(keyword)}",
+            platform="reddit",
+            source_type="search_api",
+            snippet=reddit_text[:200]
+        )
+        collector.add_source(
+            title=f"Hacker News Algolia Search: {keyword}",
+            url=f"https://hn.algolia.com/api/v1/search?query={requests.utils.quote(keyword)}",
+            platform="hackernews",
+            source_type="search_api"
+        )
+        collector.add_source(
+            title=f"GitHub Repositories Search API: {keyword}",
+            url=f"https://api.github.com/search/repositories?q={requests.utils.quote(keyword)}",
+            platform="github",
+            source_type="search_api",
+            snippet=gh_summary[:200]
+        )
+
         aggregated_data = {
             "keyword": keyword,
             "twitter": twitter_text,
@@ -263,6 +331,7 @@ class ResearcherAgent:
             "github": gh_summary,
             "reddit": reddit_text,
             "hackernews": self._search_hackernews(keyword),
+            "sources": collector.get_sources()
         }
 
         return aggregated_data
@@ -276,11 +345,29 @@ class ResearcherAgent:
             jina_search_url = f"https://s.jina.ai/{requests.utils.quote(query)}"
             resp = requests.get(jina_search_url, timeout=30)
             if resp.status_code == 200:
-                return {"raw_output": resp.text[:5000]}
-            return {"raw_output": ""}
+                raw_text = resp.text[:5000]
+                collector = SourceCollector()
+                collector.add_source(
+                    title=f"Web Search Query: {query}",
+                    url=jina_search_url,
+                    platform="web",
+                    source_type="search_query",
+                    snippet=f"Query: {query}"
+                )
+                urls = re.findall(r'https?://[^\s)\]"\'>]+', raw_text)
+                for u in urls[:6]:
+                    if "jina.ai" not in u:
+                        collector.add_source(
+                            title=f"Search Result Link: {u.split('//')[-1].split('/')[0]}",
+                            url=u,
+                            platform="web",
+                            source_type="search_result"
+                        )
+                return {"raw_output": raw_text, "sources": collector.get_sources()}
+            return {"raw_output": "", "sources": []}
         except Exception as e:
             logger.error(f"Web search failed: {e}")
-            return {"raw_output": ""}
+            return {"raw_output": "", "sources": []}
 
     def fetch_linkedin_profile(self, url: str) -> str:
         """Fetches a public LinkedIn profile page via Jina Reader."""
@@ -324,6 +411,7 @@ class ResearcherAgent:
                 return {"error": f"Repository '{owner}/{repo}' not found or inaccessible."}
             repo_data = repo_resp.json()
 
+
             # Top contributors
             contrib_resp = requests.get(
                 f"https://api.github.com/repos/{owner}/{repo}/contributors?per_page=5",
@@ -345,6 +433,38 @@ class ResearcherAgent:
             languages = lang_resp.json() if lang_resp.status_code == 200 else {}
 
             license_info = repo_data.get("license") or {}
+
+            collector = SourceCollector()
+            collector.add_source(
+                title=f"GitHub Repository: {repo_data.get('full_name', f'{owner}/{repo}')}",
+                url=repo_data.get("html_url") or f"https://github.com/{owner}/{repo}",
+                platform="github",
+                source_type="git_repository",
+                snippet=f"Stars: {repo_data.get('stargazers_count', 0):,} | Forks: {repo_data.get('forks_count', 0):,} | Desc: {repo_data.get('description', '')[:200]}"
+            )
+            collector.add_source(
+                title=f"GitHub Repo API: {owner}/{repo}",
+                url=f"https://api.github.com/repos/{owner}/{repo}",
+                platform="github",
+                source_type="rest_api",
+                snippet=f"Primary Language: {repo_data.get('language', 'Unknown')} | Open Issues: {repo_data.get('open_issues_count', 0)}"
+            )
+            collector.add_source(
+                title=f"Repository Languages Breakdown: {owner}/{repo}",
+                url=f"https://api.github.com/repos/{owner}/{repo}/languages",
+                platform="github",
+                source_type="rest_api",
+                snippet=f"Detected languages: {', '.join(list(languages.keys())[:5]) if languages else 'None'}"
+            )
+            if contributors:
+                collector.add_source(
+                    title=f"Top Contributors API: {owner}/{repo}",
+                    url=f"https://api.github.com/repos/{owner}/{repo}/contributors",
+                    platform="github",
+                    source_type="rest_api",
+                    snippet=f"Top contributors: {', '.join([c['login'] for c in contributors[:5]])}"
+                )
+
             return {
                 "name": repo_data.get("full_name", ""),
                 "description": repo_data.get("description", ""),
@@ -359,10 +479,12 @@ class ResearcherAgent:
                 "pushed_at": repo_data.get("pushed_at", ""),
                 "contributors": contributors,
                 "languages": languages,
+                "sources": collector.get_sources()
             }
         except Exception as e:
             logger.error(f"GitHub repo fetch failed: {e}")
             return {"error": str(e)}
+
 
     def fetch_repository_intelligence(self, query: str) -> dict:
         """
@@ -645,16 +767,49 @@ class ResearcherAgent:
             if registry_resp.status_code == 200:
                 data = registry_resp.json()
                 latest = data.get("dist-tags", {}).get("latest", "")
+                repo_url = data.get("repository", {}).get("url", "") if isinstance(data.get("repository"), dict) else ""
+                if isinstance(repo_url, str) and repo_url.startswith("git+"):
+                    repo_url = repo_url[4:]
+                if isinstance(repo_url, str) and repo_url.endswith(".git"):
+                    repo_url = repo_url[:-4]
+
+                dl_resp = requests.get(f"https://api.npmjs.org/downloads/point/last-week/{requests.utils.quote(package_name)}", timeout=10)
+                weekly_dl = dl_resp.json().get("downloads", 0) if dl_resp.status_code == 200 else 0
+
+                collector = SourceCollector()
+                collector.add_source(
+                    title=f"npm Package: {data.get('name', package_name)}",
+                    url=f"https://www.npmjs.com/package/{data.get('name', package_name)}",
+                    platform="npm",
+                    source_type="package_registry",
+                    snippet=f"Version: {latest} | Weekly Downloads: {weekly_dl:,} | Desc: {data.get('description', '')[:200]}"
+                )
+                collector.add_source(
+                    title=f"npm Registry API: {package_name}",
+                    url=f"https://registry.npmjs.org/{requests.utils.quote(package_name)}",
+                    platform="npm",
+                    source_type="rest_api",
+                    snippet=f"Maintainers: {len(data.get('maintainers', []))} | License: {data.get('license', 'None')}"
+                )
+                if repo_url:
+                    collector.add_source(
+                        title=f"Package Repository: {data.get('name', package_name)}",
+                        url=repo_url,
+                        platform="github",
+                        source_type="git_repository"
+                    )
+
                 result = {
                     "name": data.get("name"),
                     "description": data.get("description"),
                     "version": latest,
-                    "repository": data.get("repository", {}).get("url", "") if isinstance(data.get("repository"), dict) else "",
-                    "maintainers_count": len(data.get("maintainers", []))
+                    "repository": repo_url,
+                    "maintainers_count": len(data.get("maintainers", [])),
+                    "weekly_downloads": weekly_dl,
+                    "sources": collector.get_sources()
                 }
-                dl_resp = requests.get(f"https://api.npmjs.org/downloads/point/last-week/{requests.utils.quote(package_name)}", timeout=10)
-                result["weekly_downloads"] = dl_resp.json().get("downloads", 0) if dl_resp.status_code == 200 else 0
             return result
         except Exception as e:
             logger.error(f"npm package fetch failed: {e}")
             return {"error": str(e)}
+

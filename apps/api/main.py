@@ -53,7 +53,7 @@ app.add_middleware(
 VALID_RESEARCH_TYPES = {
     "developer", "startup", "email", "youtube",
     "reddit", "idea", "social", "linkedin", "npm",
-    "hackernews", "github-repo"
+    "hackernews", "github-repo", "repository"
 }
 
 # Optional API key auth (read from env; empty string = disabled)
@@ -190,6 +190,13 @@ async def get_job_status(job_id: str, db: Session = Depends(get_db)):
         except (json.JSONDecodeError, TypeError):
             raw_data = None
 
+    sources = []
+    if job.sources:
+        try:
+            sources = json.loads(job.sources)
+        except (json.JSONDecodeError, TypeError):
+            sources = []
+
     return {
         "job_id": job.job_id,
         "status": job.status,
@@ -197,11 +204,13 @@ async def get_job_status(job_id: str, db: Session = Depends(get_db)):
         "report": job.report_markdown,
         "report_markdown": job.report_markdown,
         "raw_data": raw_data,
+        "sources": sources,
         "research_type": job.research_type,
         "error": job.error_message,
         "created_at": job.created_at.isoformat() if job.created_at else None,
         "updated_at": job.updated_at.isoformat() if job.updated_at else None,
     }
+
 
 
 
