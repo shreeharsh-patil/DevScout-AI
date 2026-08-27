@@ -85,13 +85,16 @@ async function fetchWithTimeout(
   timeoutMs: number,
 ): Promise<Response> {
   const controller = new AbortController();
+  const externalSignal = init?.signal;
+  const abortFromCaller = () => controller.abort(externalSignal?.reason);
+  externalSignal?.addEventListener("abort", abortFromCaller, { once: true });
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     const response = await fetch(input, { ...init, signal: controller.signal });
     return response;
   } catch (err: unknown) {
-    if (err instanceof DOMException && err.name === "AbortError") {
+    if (err instanceof DOMException && err.name === "AbortError" && !externalSignal?.aborted) {
       throw new ApiTimeoutError(
         `Request timed out after ${Math.round(timeoutMs / 1000)}s`,
       );
@@ -104,6 +107,7 @@ async function fetchWithTimeout(
     throw err;
   } finally {
     clearTimeout(timer);
+    externalSignal?.removeEventListener("abort", abortFromCaller);
   }
 }
 
@@ -360,21 +364,24 @@ export async function getWorkspaceUsage(
 /** Submit a new research job */
 export async function startResearch(
   payload: ResearchRequest,
+  signal?: AbortSignal,
 ): Promise<ResearchResponse> {
   return request<ResearchResponse>("/api/v1/research", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
+    signal,
   });
 }
 
 /** Poll status of a research job */
 export async function getJobStatus(
   jobId: string,
+  signal?: AbortSignal,
 ): Promise<JobStatusResponse> {
   return request<JobStatusResponse>(
     `/api/v1/research/status/${encodeURIComponent(jobId)}`,
-    { timeoutMs: POLL_TIMEOUT_MS },
+    { timeoutMs: POLL_TIMEOUT_MS, signal },
   );
 }
 

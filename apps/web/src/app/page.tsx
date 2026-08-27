@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useCallback, useEffect } from "react";
+import React, { useState, useCallback } from "react";
 
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -67,7 +67,17 @@ import { updateReport, deleteJob } from "@/lib/api";
 
 import { useCyclingPlaceholder } from "@/hooks/use-cycling-placeholder";
 import { ALL_RESEARCH_TYPES } from "@/lib/type-meta";
-import type { ResearchType } from "@/types/research";
+import type { ResearchSource, ResearchType } from "@/types/research";
+
+function reportSources(report: { sources?: ResearchSource[]; raw_data?: unknown }): ResearchSource[] | undefined {
+  if (report.sources) return report.sources;
+  const raw = report.raw_data as {
+    sources?: ResearchSource[];
+    researcher?: { sources?: ResearchSource[] };
+    analysis?: { sources?: ResearchSource[] };
+  } | undefined;
+  return raw?.sources ?? raw?.researcher?.sources ?? raw?.analysis?.sources;
+}
 
 // LinkedIn icon used only in features grid (not in type-meta)
 function LinkedinIcon({ className }: { className?: string }) {
@@ -166,23 +176,22 @@ export default function OnePageApp() {
   const placeholder = useCyclingPlaceholder(query.trim() === "");
 
   const { refreshAuth } = useAuth();
-  const [isSaved, setIsSaved] = useState(false);
-  const [customTitle, setCustomTitle] = useState("");
+  const [savedOverride, setSavedOverride] = useState<{ jobId: string; value: boolean } | null>(null);
+  const [titleOverride, setTitleOverride] = useState<{ jobId: string; value: string } | null>(null);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
-
-  useEffect(() => {
-    if (report) {
-      setIsSaved(Boolean(report.is_saved));
-      setCustomTitle(report.custom_title || "");
-    }
-  }, [report]);
+  const isSaved = report
+    ? savedOverride?.jobId === report.job_id ? savedOverride.value : Boolean(report.is_saved)
+    : false;
+  const customTitle = report
+    ? titleOverride?.jobId === report.job_id ? titleOverride.value : report.custom_title || ""
+    : "";
 
   const handleToggleSaveCurrentReport = async () => {
     if (!report?.job_id) return;
     try {
       const next = !isSaved;
       await updateReport(report.job_id, { is_saved: next });
-      setIsSaved(next);
+      setSavedOverride({ jobId: report.job_id, value: next });
       refreshAuth();
     } catch (e) {
       console.error(e);
@@ -193,6 +202,7 @@ export default function OnePageApp() {
     if (!report?.job_id) return;
     try {
       await updateReport(report.job_id, { custom_title: customTitle.trim() });
+      setTitleOverride({ jobId: report.job_id, value: customTitle.trim() });
       setIsEditingTitle(false);
       refreshAuth();
     } catch (e) {
@@ -576,7 +586,7 @@ export default function OnePageApp() {
                                   type="text"
                                   placeholder="Custom report title..."
                                   value={customTitle}
-                                  onChange={(e) => setCustomTitle(e.target.value)}
+                                  onChange={(e) => report && setTitleOverride({ jobId: report.job_id, value: e.target.value })}
                                   className="bg-black border border-indigo-500 rounded px-2 py-0.5 text-xs text-white focus:outline-none"
                                   autoFocus
                                 />
@@ -656,12 +666,7 @@ export default function OnePageApp() {
 
                     {/* Normalized Sources Explorer */}
                     <SourcesPanel
-                      sources={
-                        report.sources ||
-                        (report.raw_data as any)?.sources ||
-                        (report.raw_data as any)?.researcher?.sources ||
-                        (report.raw_data as any)?.analysis?.sources
-                      }
+                      sources={reportSources(report)}
                     />
                   </motion.div>
                 )}

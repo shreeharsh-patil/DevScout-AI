@@ -43,6 +43,13 @@ export const TYPE_META: Record<string, TypeMeta> = {
     color: "text-orange-400 border-orange-500/30 bg-orange-500/5",
     bg: "bg-orange-500/10",
   },
+  email_intelligence: {
+    label: "Email Intelligence",
+    icon: <Mail className="w-3 h-3 text-amber-400" />,
+    color: "text-amber-400 border-amber-500/30 bg-amber-500/5",
+    bg: "bg-amber-500/10",
+  },
+
   youtube: {
     label: "YouTube Analysis",
     icon: <PlayCircle className="w-3 h-3" />,

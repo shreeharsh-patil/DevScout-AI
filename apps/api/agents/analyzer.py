@@ -1,7 +1,8 @@
-from typing import Dict, List
+﻿from typing import Dict, List
 from loguru import logger
 import os
 import json
+import re
 from dotenv import load_dotenv
 
 # Try to load google-generativeai for LLM analysis
@@ -56,13 +57,30 @@ class AnalyzerAgent:
         Raises RuntimeError('RATE_LIMITED') on ResourceExhausted.
         """
         try:
-            response = self.model.generate_content(prompt)
+            response = self.model.generate_content(
+                prompt,
+                request_options={"timeout": float(os.getenv("LLM_TIMEOUT_SECONDS", "45"))},
+            )
             return response.text
         except google.api_core.exceptions.ResourceExhausted:
             logger.warning("Gemini rate limit hit (ResourceExhausted).")
             raise RuntimeError("RATE_LIMITED")
         except Exception:
             raise
+
+    @staticmethod
+    def _parse_llm_json(value: str) -> Dict:
+        """Parse a bounded JSON object from a model response without trusting prose/fences."""
+        if not isinstance(value, str) or not value.strip() or len(value) > 200_000:
+            raise ValueError("LLM response was empty or too large")
+        cleaned = re.sub(r"^\s*```(?:json)?\s*|\s*```\s*$", "", value.strip(), flags=re.IGNORECASE)
+        start = cleaned.find("{")
+        if start < 0:
+            raise ValueError("LLM response did not contain a JSON object")
+        parsed, _ = json.JSONDecoder().raw_decode(cleaned[start:])
+        if not isinstance(parsed, dict):
+            raise ValueError("LLM response JSON must be an object")
+        return parsed
 
     def analyze_developer(self, github_data: Dict) -> Dict:
         logger.info("Analyzing real developer profile data...")
@@ -123,7 +141,7 @@ class AnalyzerAgent:
             try:
                 res_text = self._safe_generate(prompt)
                 res_text = res_text.replace('```json', '').replace('```', '').strip()
-                llm_data = json.loads(res_text)
+                llm_data = self._parse_llm_json(res_text)
                 
                 return {
                     "score": calculated_score,
@@ -131,7 +149,7 @@ class AnalyzerAgent:
                     "summary": llm_data.get("summary", ""),
                     "raw_insights": llm_data.get("raw_insights", "")
                 }
-            except RuntimeError as e:
+            except RuntimeError:
                 raise
             except Exception as e:
                 logger.error(f"LLM parsing failed: {e}. Falling back to strict data extraction.")
@@ -191,7 +209,7 @@ class AnalyzerAgent:
             try:
                 res_text = self._safe_generate(prompt)
                 res_text = res_text.replace('```json', '').replace('```', '').strip()
-                llm_data = json.loads(res_text)
+                llm_data = self._parse_llm_json(res_text)
                 
                 return {
                     "summary": llm_data.get("summary", "Could not parse summary."),
@@ -275,11 +293,9 @@ class AnalyzerAgent:
         has_breaches = len(breaches) > 0
         has_web = len(web_mentions) > 0
         has_social = len(social_profiles) > 0
-        has_news = len(news_mentions) > 0
         has_confirmed_github = len(confirmed_gh) > 0
         has_whois = bool(whois.get("registrant_name") or whois.get("registrant_org"))
         has_pgp = pgp_keys.get("found", False)
-        has_paste = len(pastebin) > 0
 
         possible_name = enrichment.get("possible_name")
         gravatar_name = gravatar.get("display_name")
@@ -305,7 +321,7 @@ class AnalyzerAgent:
             if has_confirmed_github:
                 verified_summary.append(f"Confirmed GitHub: {', '.join(a['login'] for a in confirmed_gh)} (Exact commit/profile email match)")
             if has_pgp:
-                verified_summary.append(f"PGP Key: Verified UID match on public keyserver")
+                verified_summary.append("PGP Key: Verified UID match on public keyserver")
             if has_breaches:
                 breach_names = [b.get("name", "Breach") for b in breaches[:3]]
                 verified_summary.append(f"Data Breaches: {', '.join(breach_names)}")
@@ -314,7 +330,7 @@ class AnalyzerAgent:
 
             candidate_summary = []
             for c in candidate_gh:
-                candidate_summary.append(f"GitHub handle '{c['login']}' (Guess from email prefix '{local}' — NO email match found)")
+                candidate_summary.append(f"GitHub handle '{c['login']}' (Guess from email prefix '{local}' â€” NO email match found)")
 
             prompt = f"""
             Act as a strict, evidence-based OSINT identity intelligence analyst.
@@ -351,7 +367,7 @@ class AnalyzerAgent:
             try:
                 res_text = self._safe_generate(prompt)
                 res_text = res_text.replace('```json', '').replace('```', '').strip()
-                llm_data = json.loads(res_text)
+                llm_data = self._parse_llm_json(res_text)
                 llm_summary = llm_data.get("executive_summary", "")
                 if llm_summary:
                     summary = llm_summary
@@ -468,7 +484,7 @@ class AnalyzerAgent:
             try:
                 res_text = self._safe_generate(prompt)
                 res_text = res_text.replace('```json', '').replace('```', '').strip()
-                llm_data = json.loads(res_text)
+                llm_data = self._parse_llm_json(res_text)
                 
                 return {
                     "status": "success",
@@ -524,7 +540,7 @@ class AnalyzerAgent:
             try:
                 res_text = self._safe_generate(prompt)
                 res_text = res_text.replace('```json', '').replace('```', '').strip()
-                return json.loads(res_text)
+                return self._parse_llm_json(res_text)
             except RuntimeError:
                 raise
             except Exception as e:
@@ -566,7 +582,7 @@ class AnalyzerAgent:
             try:
                 res_text = self._safe_generate(prompt)
                 res_text = res_text.replace('```json', '').replace('```', '').strip()
-                return json.loads(res_text)
+                return self._parse_llm_json(res_text)
             except RuntimeError:
                 raise
             except Exception as e:
@@ -606,7 +622,7 @@ class AnalyzerAgent:
             try:
                 res_text = self._safe_generate(prompt)
                 res_text = res_text.replace('```json', '').replace('```', '').strip()
-                return json.loads(res_text)
+                return self._parse_llm_json(res_text)
             except RuntimeError:
                 raise
             except Exception as e:
@@ -644,9 +660,8 @@ class AnalyzerAgent:
             }}
             """
             try:
-                response = self.model.generate_content(prompt)
-                res_text = response.text.replace('```json', '').replace('```', '').strip()
-                return json.loads(res_text)
+                res_text = self._safe_generate(prompt)
+                return self._parse_llm_json(res_text)
             except Exception as e:
                 logger.error(f"LLM parsing failed for npm analysis: {e}")
 
@@ -691,7 +706,7 @@ class AnalyzerAgent:
             try:
                 res_text = self._safe_generate(prompt)
                 res_text = res_text.replace('```json', '').replace('```', '').strip()
-                return json.loads(res_text)
+                return self._parse_llm_json(res_text)
             except RuntimeError:
                 raise
             except Exception as e:
@@ -746,7 +761,7 @@ class AnalyzerAgent:
             try:
                 res_text = self._safe_generate(prompt)
                 res_text = res_text.replace('```json', '').replace('```', '').strip()
-                return json.loads(res_text)
+                return self._parse_llm_json(res_text)
             except RuntimeError:
                 raise
             except Exception as e:
@@ -755,7 +770,7 @@ class AnalyzerAgent:
         # Fallback without LLM
         return {
             "health_score": 0,
-            "summary": f"Package: {npm_data.get('name', 'Unknown')} v{npm_data.get('version', '?')} — {npm_data.get('description', 'No description')}",
+            "summary": f"Package: {npm_data.get('name', 'Unknown')} v{npm_data.get('version', '?')} â€” {npm_data.get('description', 'No description')}",
             "popularity": "Unknown",
             "maintenance_status": "Unknown",
             "recommendation": "Add GEMINI_API_KEY to .env for AI-powered npm analysis."
@@ -798,7 +813,7 @@ class AnalyzerAgent:
             try:
                 res_text = self._safe_generate(prompt)
                 res_text = res_text.replace('```json', '').replace('```', '').strip()
-                return json.loads(res_text)
+                return self._parse_llm_json(res_text)
             except RuntimeError:
                 raise
             except Exception as e:
@@ -860,7 +875,7 @@ class AnalyzerAgent:
             try:
                 res_text = self._safe_generate(prompt)
                 res_text = res_text.replace('```json', '').replace('```', '').strip()
-                return json.loads(res_text)
+                return self._parse_llm_json(res_text)
             except RuntimeError:
                 raise
             except Exception as e:
@@ -877,7 +892,7 @@ class AnalyzerAgent:
             "health_score": heuristic_score,
             "insights": [
                 f"Primary language: {top_lang}",
-                f"Open issues: {open_issues} — {'well maintained' if open_issues < 100 else 'active backlog'}",
+                f"Open issues: {open_issues} â€” {'well maintained' if open_issues < 100 else 'active backlog'}",
                 f"License: {repo_data.get('license', 'None specified')}",
             ],
             "primary_use_case": "Add GEMINI_API_KEY to .env for AI-powered use case analysis."
@@ -887,7 +902,7 @@ class AnalyzerAgent:
         """
         Comprehensive repository analysis using ONLY retrieved data.
         Uses a transparent, deterministic scoring formula.
-        No metrics are invented — every statement derives from collected data.
+        No metrics are invented â€” every statement derives from collected data.
         """
         logger.info(f"Analyzing repository: {repo_data.get('name', 'Unknown') if isinstance(repo_data, dict) else 'Unknown'}")
 
@@ -897,7 +912,7 @@ class AnalyzerAgent:
                 "summary": repo_data.get("error", "Repository not found.") if isinstance(repo_data, dict) else "Repository not found."
             }
 
-        # ── Extract all raw metrics ──
+        # â”€â”€ Extract all raw metrics â”€â”€
         stars = repo_data.get("stars", 0)
         forks = repo_data.get("forks", 0)
         watchers = repo_data.get("watchers", 0)
@@ -918,7 +933,7 @@ class AnalyzerAgent:
         archived = repo_data.get("archived", False)
         is_fork = repo_data.get("fork", False)
 
-        # ── Transparent scoring formula ──
+        # â”€â”€ Transparent scoring formula â”€â”€
         # Each component is 0-100, weighted, then combined.
         score_components = {}
 
@@ -1047,7 +1062,7 @@ class AnalyzerAgent:
             community += 5
         score_components["community_strength"] = min(100, community)
 
-        # ── Weighted composite score ──
+        # â”€â”€ Weighted composite score â”€â”€
         weights = {
             "community_adoption": 0.25,
             "maintenance_activity": 0.25,
@@ -1059,37 +1074,37 @@ class AnalyzerAgent:
         total_score = sum(score_components[k] * weights[k] for k in weights)
         total_score = max(0, min(100, round(total_score)))
 
-        # ── Risk assessment (data-driven) ──
+        # â”€â”€ Risk assessment (data-driven) â”€â”€
         risks = []
         if archived:
             risks.append("Repository is archived and no longer maintained.")
         if is_fork:
             risks.append("This is a fork, not the canonical repository.")
         if last_activity_days > 365:
-            risks.append(f"No commits in {last_activity_days} days — appears abandoned.")
+            risks.append(f"No commits in {last_activity_days} days â€” appears abandoned.")
         elif last_activity_days > 180:
-            risks.append(f"Last activity was {last_activity_days} days ago — declining activity.")
+            risks.append(f"Last activity was {last_activity_days} days ago â€” declining activity.")
         if open_issues > 500:
-            risks.append(f"High open issue count ({open_issues}) — potential maintenance burden.")
+            risks.append(f"High open issue count ({open_issues}) â€” potential maintenance burden.")
         if num_contributors <= 1:
-            risks.append("Single contributor — bus factor risk.")
+            risks.append("Single contributor â€” bus factor risk.")
         if not readme or len(readme) < 100:
-            risks.append("Missing or minimal README — poor onboarding documentation.")
+            risks.append("Missing or minimal README â€” poor onboarding documentation.")
         if not releases:
-            risks.append("No releases found — versioning and stability unclear.")
+            risks.append("No releases found â€” versioning and stability unclear.")
         if repo_data.get("license") == "None" or not repo_data.get("license"):
-            risks.append("No license specified — legal usage unclear.")
+            risks.append("No license specified â€” legal usage unclear.")
 
-        # ── Strengths (data-driven) ──
+        # â”€â”€ Strengths (data-driven) â”€â”€
         strengths = []
         if stars >= 10000:
             strengths.append(f"Very high adoption with {stars:,} stars.")
         elif stars >= 1000:
             strengths.append(f"Strong adoption with {stars:,} stars.")
         if last_activity_days <= 7:
-            strengths.append("Very active — commits within the last week.")
+            strengths.append("Very active â€” commits within the last week.")
         elif last_activity_days <= 30:
-            strengths.append("Actively maintained — commits within the last month.")
+            strengths.append("Actively maintained â€” commits within the last month.")
         if num_contributors >= 20:
             strengths.append(f"Healthy contributor base ({num_contributors} contributors).")
         if releases:
@@ -1103,7 +1118,7 @@ class AnalyzerAgent:
         if repo_data.get("license") and repo_data.get("license") != "None":
             strengths.append(f"Licensed under {repo_data.get('license')}.")
 
-        # ── Technology stack from languages ──
+        # â”€â”€ Technology stack from languages â”€â”€
         tech_stack = []
         if languages:
             total_bytes = sum(languages.values())
@@ -1112,7 +1127,7 @@ class AnalyzerAgent:
                 if pct >= 1:  # Only include languages with >= 1% of codebase
                     tech_stack.append({"language": lang, "percentage": round(pct, 1), "bytes": bytes_count})
 
-        # ── Contribution distribution summary ──
+        # â”€â”€ Contribution distribution summary â”€â”€
         contrib_summary = []
         if contributors:
             total_contributions = sum(c.get("contributions", 0) for c in contributors)
@@ -1124,7 +1139,7 @@ class AnalyzerAgent:
                     "percentage": round(contrib_pct, 1),
                 })
 
-        # ── Project structure summary ──
+        # â”€â”€ Project structure summary â”€â”€
         structure_summary = []
         if root_contents:
             dirs = [i["name"] for i in root_contents if i["type"] == "dir"]
@@ -1135,7 +1150,7 @@ class AnalyzerAgent:
                 "has_common_manifests": bool(dependencies),
             }
 
-        # ── Summary generation ──
+        # â”€â”€ Summary generation â”€â”€
         if self.use_llm:
             logger.info("Using Gemini LLM for Repository Intelligence Analysis")
             prompt = f"""
@@ -1180,7 +1195,7 @@ class AnalyzerAgent:
             try:
                 res_text = self._safe_generate(prompt)
                 res_text = res_text.replace('```json', '').replace('```', '').strip()
-                llm_data = json.loads(res_text)
+                llm_data = self._parse_llm_json(res_text)
                 # Merge LLM insights with deterministic data
                 return {
                     "status": "completed",
@@ -1225,7 +1240,7 @@ class AnalyzerAgent:
             except Exception as e:
                 logger.error(f"LLM parsing failed for repository analysis: {e}")
 
-        # ── Fallback: deterministic analysis without LLM ──
+        # â”€â”€ Fallback: deterministic analysis without LLM â”€â”€
         logger.info("No Gemini API key found. Using deterministic repository analysis.")
 
         summary_parts = []
@@ -1279,7 +1294,7 @@ class AnalyzerAgent:
             "documentation_assessment": doc_assessment,
             "notable_strengths": strengths[:5],
             "key_risks": risks[:5],
-            "recommendation": f"{'Recommended' if total_score >= 60 else 'Use with caution'} — {health} repository with {stars:,} stars.",
+            "recommendation": f"{'Recommended' if total_score >= 60 else 'Use with caution'} â€” {health} repository with {stars:,} stars.",
             # Deterministic data
             "repo_name": repo_data.get("name", ""),
             "repo_url": repo_data.get("url", ""),
@@ -1304,3 +1319,4 @@ class AnalyzerAgent:
             "structure_summary": structure_summary,
             "readme_excerpt": readme[:2000] if readme else "",
         }
+

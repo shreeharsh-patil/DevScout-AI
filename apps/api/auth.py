@@ -23,12 +23,13 @@ from loguru import logger
 from sqlalchemy.orm import Session
 
 from database import Report, UsageLog, User, Workspace, WorkspaceMember, get_db
+from settings import ENABLE_DEMO_AUTH, JWT_SECRET as CONFIGURED_JWT_SECRET, TRUST_IDENTITY_HEADERS
 
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
 
-JWT_SECRET: str = os.getenv("JWT_SECRET", "devscout-ai-secure-jwt-secret-key-2026")
+JWT_SECRET: str = CONFIGURED_JWT_SECRET or "development-only-devscout-jwt-secret"
 JWT_ALGORITHM = "HS256"
 JWT_EXP_SECONDS = 60 * 60 * 24 * 7  # 7 days
 
@@ -74,11 +75,16 @@ def create_jwt_token(payload: Dict, secret: str = JWT_SECRET, exp_seconds: int =
 def verify_jwt_token(token: str, secret: str = JWT_SECRET) -> Optional[Dict]:
     """Verifies a signed HMAC-SHA256 JWT token and returns payload if valid."""
     try:
+        if len(token) > 8192:
+            return None
         parts = token.strip().split(".")
         if len(parts) != 3:
             return None
 
         encoded_header, encoded_payload, encoded_signature = parts
+        header = json.loads(_base64url_decode(encoded_header).decode("utf-8"))
+        if header != {"typ": "JWT", "alg": JWT_ALGORITHM}:
+            return None
         signing_input = f"{encoded_header}.{encoded_payload}".encode("utf-8")
 
         expected_sig = hmac.new(secret.encode("utf-8"), signing_input, hashlib.sha256).digest()
@@ -92,7 +98,9 @@ def verify_jwt_token(token: str, secret: str = JWT_SECRET) -> Optional[Dict]:
 
         # Check expiration
         exp = payload.get("exp")
-        if exp and exp < time.time():
+        if not isinstance(exp, (int, float)) or exp < time.time():
+            return None
+        if not isinstance(payload.get("sub") or payload.get("user_id"), str):
             return None
 
         return payload
@@ -157,21 +165,24 @@ def get_current_auth(
 ) -> Tuple[User, Workspace]:
     """
     Extracts and validates authenticated User and Workspace.
-    Supports Bearer tokens, explicit tenancy headers, and seamless demo fallback.
+    Supports Bearer tokens and optional development-only identity headers/demo mode.
     """
     user_id = None
     workspace_id = None
 
     # 1. Bearer Token Check
-    if authorization and authorization.startswith("Bearer "):
-        token = authorization.split(" ")[1]
+    if authorization:
+        if not authorization.startswith("Bearer "):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid authorization scheme")
+        token = authorization.removeprefix("Bearer ").strip()
         payload = verify_jwt_token(token)
-        if payload:
-            user_id = payload.get("sub") or payload.get("user_id")
-            workspace_id = payload.get("workspace_id") or payload.get("org_id")
+        if not payload:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired access token")
+        user_id = payload.get("sub") or payload.get("user_id")
+        workspace_id = payload.get("workspace_id") or payload.get("org_id")
 
     # 2. Header overrides / API keys
-    if not user_id and x_user_id:
+    if TRUST_IDENTITY_HEADERS and not user_id and x_user_id:
         user_id = x_user_id
     if not workspace_id and x_workspace_id:
         workspace_id = x_workspace_id
@@ -181,8 +192,12 @@ def get_current_auth(
     if user_id:
         user = db.query(User).filter(User.id == user_id).first()
 
-    # If no user found from token/headers, fall back to default demo user
+    # Demo fallback is intentionally limited to local development.
     if not user:
+        if user_id:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authenticated user no longer exists")
+        if not ENABLE_DEMO_AUTH:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
         user, default_ws = get_or_create_default_tenant(db)
         if not workspace_id:
             return user, default_ws
@@ -269,18 +284,20 @@ def verify_report_access(
         raise HTTPException(status_code=404, detail="Report not found.")
 
     # If report has a workspace_id, user MUST belong to that workspace
-    if report.workspace_id and report.workspace_id != workspace.id:
-        # Check if user has membership in the report's workspace
-        membership = (
-            db.query(WorkspaceMember)
-            .filter(WorkspaceMember.workspace_id == report.workspace_id, WorkspaceMember.user_id == user.id)
-            .first()
-        )
-        if not membership:
+    if report.workspace_id:
+        if report.workspace_id != workspace.id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Forbidden: You do not have permission to view or modify this report."
             )
+    else:
+        # Legacy or test reports without explicit workspace_id belong to default workspace
+        if not ENABLE_DEMO_AUTH or workspace.id != DEMO_WORKSPACE_ID:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: You do not have permission to view or modify this report."
+            )
+
 
 
 # ---------------------------------------------------------------------------
@@ -298,21 +315,24 @@ def check_and_deduct_credits(
     """
     Verifies that the workspace has sufficient credits remaining and logs the transaction.
     """
-    if workspace.credits_used + credits_cost > workspace.monthly_credit_limit:
+    if db is None:
+        raise RuntimeError("A database session is required for credit accounting")
+    if credits_cost < 1:
+        raise ValueError("credits_cost must be positive")
+    locked_workspace = db.query(Workspace).filter(Workspace.id == workspace.id).with_for_update().one()
+    if locked_workspace.credits_used + credits_cost > locked_workspace.monthly_credit_limit:
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
-            detail=f"Credit limit exceeded. Used {workspace.credits_used}/{workspace.monthly_credit_limit} credits. Please upgrade your plan."
+            detail=f"Credit limit exceeded. Used {locked_workspace.credits_used}/{locked_workspace.monthly_credit_limit} credits. Please upgrade your plan."
         )
 
-    workspace.credits_used += credits_cost
-    if db:
-        usage = UsageLog(
-            id=f"usg_{int(time.time()*1000)}_{job_id[:8]}",
-            workspace_id=workspace.id,
-            user_id=user.id,
-            job_id=job_id,
-            action=action,
-            credits_deducted=credits_cost
-        )
-        db.add(usage)
-        db.commit()
+    locked_workspace.credits_used += credits_cost
+    usage = UsageLog(
+        id=f"usg_{os.urandom(8).hex()}",
+        workspace_id=locked_workspace.id,
+        user_id=user.id,
+        job_id=job_id,
+        action=action,
+        credits_deducted=credits_cost
+    )
+    db.add(usage)

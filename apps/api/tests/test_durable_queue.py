@@ -28,10 +28,11 @@ class TestDurableQueueAndWorker:
 
     def test_job_submission_creates_db_record(self):
         client = TestClient(app)
-        res = client.post(
-            "/api/v1/research",
-            json={"query": "test_user", "type": "developer"}
-        )
+        with patch("main.enqueue_research_job", return_value={"queued": True}):
+            res = client.post(
+                "/api/v1/research",
+                json={"query": "test_user", "type": "developer"}
+            )
         assert res.status_code == 200
         data = res.json()
         job_id = data["job_id"]

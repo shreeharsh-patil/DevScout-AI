@@ -4,11 +4,9 @@ import React, { createContext, useContext, useState, useEffect, useCallback } fr
 import {
   getMe,
   loginWithEmail,
-  listWorkspaces,
   createWorkspace as apiCreateWorkspace,
   setStoredWorkspace,
   setStoredToken,
-  getStoredWorkspace,
   UserProfile,
   WorkspaceInfo,
   AuthMeResponse,
@@ -64,7 +62,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    fetchAuth();
+    const timer = window.setTimeout(() => void fetchAuth(), 0);
+    return () => window.clearTimeout(timer);
   }, [fetchAuth]);
 
   const switchWorkspace = async (workspaceId: string) => {

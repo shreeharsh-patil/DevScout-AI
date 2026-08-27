@@ -9,8 +9,7 @@ from __future__ import annotations
 
 import datetime
 import json
-import traceback
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 from loguru import logger
 
 from database import Report, SessionLocal
@@ -98,11 +97,14 @@ def execute_research_job(job_id: str, query: str, research_type: str) -> Dict[st
             job.status = "completed"
             job.stage = "completed"
             job.report_markdown = result.get("report", "")
-            job.raw_data = json.dumps({
-                "researcher": result.get("raw_data"),
-                "analysis": result.get("analysis")
-            })
-            job.sources = json.dumps(result.get("sources", []))
+            try:
+                job.raw_data = json.dumps({
+                    "researcher": result.get("raw_data"),
+                    "analysis": result.get("analysis")
+                })
+                job.sources = json.dumps(result.get("sources", []))
+            except (TypeError, ValueError) as exc:
+                raise ValueError("Research pipeline produced non-serializable data") from exc
             job.error_message = None
             job.updated_at = datetime.datetime.now(datetime.timezone.utc)
             db.commit()
@@ -149,7 +151,7 @@ def execute_research_job(job_id: str, query: str, research_type: str) -> Dict[st
         except Exception as db_err:
             logger.error(f"[Worker] Failed to write error status to DB for job {job_id}: {db_err}")
 
-        return {"status": "failed", "job_id": job_id, "error": str(e)}
+        return {"status": "failed", "job_id": job_id, "error": "Research execution failed"}
 
     finally:
         db.close()

@@ -14,7 +14,6 @@ Usage:
 
 import os
 import sys
-import signal
 from loguru import logger
 from dotenv import load_dotenv
 

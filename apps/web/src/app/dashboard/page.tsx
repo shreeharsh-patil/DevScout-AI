@@ -3,13 +3,10 @@
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import {
-  LayoutDashboard,
   Zap,
   Bookmark,
   History,
-  TrendingUp,
   Search,
-  ExternalLink,
   Edit2,
   Trash2,
   Check,
@@ -29,28 +26,32 @@ import { Button } from "@/components/ui/button";
 import IconForType from "@/components/research/icon-for-type";
 
 export default function DashboardPage() {
-  const { user, workspace, stats, refreshAuth } = useAuth();
+  const { user, workspace, refreshAuth } = useAuth();
   const [jobs, setJobs] = useState<HistoryItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [editingJobId, setEditingJobId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState("");
   const [searchFilter, setSearchFilter] = useState("");
+  const [loadError, setLoadError] = useState("");
 
   const loadDashboardData = useCallback(async () => {
     try {
       setIsLoading(true);
+      setLoadError("");
       const historyData = await getHistory();
       setJobs(historyData);
       await refreshAuth();
     } catch (err) {
       console.error("Failed to load dashboard history:", err);
+      setLoadError(err instanceof Error ? err.message : "Failed to load workspace data.");
     } finally {
       setIsLoading(false);
     }
   }, [refreshAuth]);
 
   useEffect(() => {
-    loadDashboardData();
+    const timer = window.setTimeout(() => void loadDashboardData(), 0);
+    return () => window.clearTimeout(timer);
   }, [loadDashboardData]);
 
   const handleToggleSave = async (job: HistoryItem) => {
@@ -238,7 +239,14 @@ export default function DashboardPage() {
           </CardHeader>
 
           <CardContent className="p-0">
-            {isLoading ? (
+            {loadError ? (
+              <div role="alert" className="p-8 text-center text-sm text-red-400">
+                <p>{loadError}</p>
+                <Button variant="outline" size="sm" className="mt-4" onClick={() => void loadDashboardData()}>
+                  Try again
+                </Button>
+              </div>
+            ) : isLoading ? (
               <div className="p-12 text-center text-xs text-neutral-500 font-mono">
                 Loading workspace data...
               </div>

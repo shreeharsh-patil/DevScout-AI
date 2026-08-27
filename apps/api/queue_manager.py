@@ -8,7 +8,6 @@ Includes automatic health monitoring, retry policies, and graceful local develop
 from __future__ import annotations
 
 import os
-import time
 from typing import Any, Dict, Optional
 from loguru import logger
 import redis
@@ -85,7 +84,7 @@ def enqueue_research_job(
     query: str,
     research_type: str,
     max_retries: int = 3,
-    retry_backoff: list[int] = [15, 45, 90]
+    retry_backoff: Optional[list[int]] = None,
 ) -> Dict[str, Any]:
     """
     Enqueues a research execution task into the durable RQ queue.
@@ -103,6 +102,7 @@ def enqueue_research_job(
         # Import task execution function
         from tasks import execute_research_job
 
+        intervals = retry_backoff or [15, 45, 90]
         rq_job: Job = q.enqueue(
             execute_research_job,
             job_id,
@@ -111,7 +111,7 @@ def enqueue_research_job(
             job_id=f"rq_{job_id}",
             result_ttl=86400,          # 24 hours
             failure_ttl=604800,        # 7 days
-            retry=Retry(max=max_retries, interval=retry_backoff),
+            retry=Retry(max=max_retries, interval=intervals),
         )
 
 
@@ -142,7 +142,6 @@ def get_queue_health() -> Dict[str, Any]:
             "status": "degraded" if USE_REDIS_QUEUE else "disabled",
             "redis_connected": False,
             "mode": "fallback_executor",
-            "redis_url": REDIS_URL.split("@")[-1] if "@" in REDIS_URL else REDIS_URL,
             "active_workers": 0,
             "jobs_queued": 0,
             "jobs_failed": 0

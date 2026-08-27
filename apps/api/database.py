@@ -27,7 +27,7 @@ from sqlalchemy import (
     create_engine,
     text,
 )
-from sqlalchemy.orm import Session, declarative_base, sessionmaker, relationship
+from sqlalchemy.orm import Session, declarative_base, sessionmaker
 
 
 # ---------------------------------------------------------------------------
@@ -46,7 +46,13 @@ engine = create_engine(
     DATABASE_URL,
     **({"connect_args": {"check_same_thread": False}} if _is_sqlite else {}),
     pool_pre_ping=True,
-    **({} if _is_sqlite else {"pool_size": 5, "max_overflow": 10}),
+    **({} if _is_sqlite else {
+        "pool_size": int(os.getenv("DB_POOL_SIZE", "5")),
+        "max_overflow": int(os.getenv("DB_MAX_OVERFLOW", "10")),
+        "pool_timeout": int(os.getenv("DB_POOL_TIMEOUT", "10")),
+        "pool_recycle": int(os.getenv("DB_POOL_RECYCLE", "1800")),
+        "connect_args": {"connect_timeout": int(os.getenv("DB_CONNECT_TIMEOUT", "10"))},
+    }),
 )
 
 SessionLocal = sessionmaker(
@@ -184,6 +190,9 @@ def get_db() -> Generator[Session, None, None]:
     db = SessionLocal()
     try:
         yield db
+    except Exception:
+        db.rollback()
+        raise
     finally:
         db.close()
 
@@ -224,4 +233,4 @@ def ensure_tables() -> None:
                         conn.execute(text("ALTER TABLE reports ADD COLUMN is_archived BOOLEAN DEFAULT 0"))
                     conn.commit()
         except Exception:
-            pass
+            raise RuntimeError("Failed to apply local SQLite compatibility migration")

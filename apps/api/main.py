@@ -1,31 +1,40 @@
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, HTTPException, BackgroundTasks, Header, status
+from fastapi import Depends, FastAPI, HTTPException, BackgroundTasks, Header, Response, status
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from loguru import logger
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 import os
 import json
-from typing import List, Optional, Dict, Any
+import sys
+from typing import List, Optional
 from dotenv import load_dotenv
 
 load_dotenv()
 
 from agents.orchestrator import AgentOrchestrator
-from database import Report, SessionLocal, get_db, ensure_tables, User, Workspace, WorkspaceMember, UsageLog
+from database import Report, get_db, ensure_tables, User, Workspace, WorkspaceMember, UsageLog
 from auth import (
     get_current_auth,
-    get_current_user,
-    get_current_workspace,
     verify_report_access,
     check_and_deduct_credits,
-    create_jwt_token,
-    get_or_create_default_tenant
+    create_jwt_token
 )
-from queue_manager import enqueue_research_job, get_queue_health, is_redis_available
+from queue_manager import enqueue_research_job, get_queue_health
 from tasks import execute_research_job
+from middleware import RateLimitMiddleware, RequestContextMiddleware
+from security import validate_public_url
+from settings import (
+    ALLOW_LOCAL_QUEUE_FALLBACK,
+    API_SECRET_KEY,
+    ENABLE_DEV_TOKEN_AUTH,
+    LOG_JSON,
+    REQUIRE_QUEUE,
+    cors_origins,
+    validate_runtime_config,
+)
 
 orchestrator = AgentOrchestrator()
 
@@ -36,6 +45,9 @@ orchestrator = AgentOrchestrator()
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    validate_runtime_config()
+    logger.remove()
+    logger.add(sys.stderr, serialize=LOG_JSON, level=os.getenv("LOG_LEVEL", "INFO"))
     ensure_tables()
     yield
 
@@ -45,39 +57,44 @@ app = FastAPI(title="DevScout AI SaaS API", lifespan=lifespan)
 # ---------------------------------------------------------------------------
 # CORS – read allowed origins from environment variable
 # ---------------------------------------------------------------------------
-_cors_raw: str = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://localhost:3001")
-CORS_ORIGINS: list[str] = [
-    origin.strip() for origin in _cors_raw.split(",") if origin.strip()
-]
+CORS_ORIGINS = cors_origins()
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-API-Key", "X-Request-Id", "X-Workspace-Id"],
 )
+app.add_middleware(RateLimitMiddleware)
+app.add_middleware(RequestContextMiddleware)
 
 # ---------------------------------------------------------------------------
 # Valid research types (single source of truth)
 # ---------------------------------------------------------------------------
 VALID_RESEARCH_TYPES = {
-    "developer", "startup", "email", "youtube",
+    "developer", "startup", "email", "email_intelligence", "youtube",
     "reddit", "idea", "social", "linkedin", "npm",
     "hackernews", "github-repo", "repository"
 }
-
-API_SECRET_KEY: str = os.getenv("API_SECRET_KEY", "")
-
 
 # ---------------------------------------------------------------------------
 # Pydantic models
 # ---------------------------------------------------------------------------
 
 class ResearchRequest(BaseModel):
-    query: str
-    type: str
-    depth: str = "standard"
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    query: str = Field(min_length=1, max_length=500)
+    type: str = Field(pattern=r"^[a-z][a-z0-9_-]{1,31}$")
+    depth: str = Field(default="standard", pattern=r"^(standard)$")
+
+
+    @field_validator("type")
+    @classmethod
+    def validate_type(cls, value: str) -> str:
+        if value not in VALID_RESEARCH_TYPES:
+            raise ValueError(f"Unsupported research type: {value}")
+        return value
 
 
 class ResearchResponse(BaseModel):
@@ -86,20 +103,33 @@ class ResearchResponse(BaseModel):
 
 
 class TokenRequest(BaseModel):
-    email: str
-    name: Optional[str] = None
-    workspace_name: Optional[str] = None
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    email: str = Field(min_length=3, max_length=254, pattern=r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+    name: Optional[str] = Field(default=None, max_length=255)
+    workspace_name: Optional[str] = Field(default=None, max_length=255)
 
 
 class WorkspaceCreateRequest(BaseModel):
-    name: str
-    slug: Optional[str] = None
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    name: str = Field(min_length=1, max_length=255)
+    slug: Optional[str] = Field(default=None, min_length=2, max_length=63, pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
 
 class UpdateReportRequest(BaseModel):
-    custom_title: Optional[str] = None
+    model_config = ConfigDict(extra="forbid")
+    custom_title: Optional[str] = Field(default=None, max_length=255)
     is_saved: Optional[bool] = None
-    tags: Optional[List[str]] = None
+    tags: Optional[List[str]] = Field(default=None, max_length=20)
+
+    @field_validator("tags")
+    @classmethod
+    def validate_tags(cls, value: Optional[List[str]]) -> Optional[List[str]]:
+        if value is None:
+            return value
+        cleaned = list(dict.fromkeys(tag.strip() for tag in value if tag.strip()))
+        if any(len(tag) > 50 for tag in cleaned):
+            raise ValueError("Tags must be 50 characters or fewer")
+        return cleaned
 
 
 # ---------------------------------------------------------------------------
@@ -113,8 +143,14 @@ async def root():
 
 @app.get("/health")
 @app.get("/api/v1/health")
-async def health(db: Session = Depends(get_db)):
-    """Comprehensive health check including database and queue/worker status."""
+async def health():
+    """Liveness probe: succeeds when the API process can serve requests."""
+    return {"status": "ok", "service": "devscout-api", "queue": {"status": "not_checked"}}
+
+
+@app.get("/api/v1/ready")
+async def readiness(response: Response, db: Session = Depends(get_db)):
+    """Readiness probe for database and required queue dependencies."""
     db_ok = True
     try:
         db.execute(text("SELECT 1"))
@@ -123,8 +159,12 @@ async def health(db: Session = Depends(get_db)):
 
     queue_health = get_queue_health()
 
+    queue_ok = queue_health.get("redis_connected", False) or not REQUIRE_QUEUE
+    ready = db_ok and queue_ok
+    if not ready:
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
     return {
-        "status": "ok" if db_ok else "degraded",
+        "status": "ready" if ready else "not_ready",
         "service": "devscout-api",
         "database": "connected" if db_ok else "disconnected",
         "queue": queue_health,
@@ -204,6 +244,8 @@ async def get_me(
 @app.post("/api/v1/auth/token")
 async def generate_auth_token(payload: TokenRequest, db: Session = Depends(get_db)):
     """Generates a JWT access token for authentication (used by frontend auth & tests)."""
+    if not ENABLE_DEV_TOKEN_AUTH:
+        raise HTTPException(status_code=404, detail="Development token authentication is disabled")
     email = payload.email.strip().lower()
     user = db.query(User).filter(User.email == email).first()
     if not user:
@@ -390,36 +432,30 @@ async def start_research(
         if x_api_key != API_SECRET_KEY:
             raise HTTPException(status_code=401, detail="Invalid or missing X-API-Key header.")
 
-    # Input Validation
-    query = (request.query or "").strip()
-    if not query:
-        raise HTTPException(status_code=422, detail="'query' must not be empty.")
-    if len(query) > 500:
-        raise HTTPException(status_code=422, detail="'query' must be 500 characters or fewer.")
-    if request.type not in VALID_RESEARCH_TYPES:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Invalid research type '{request.type}'. Must be one of: {', '.join(sorted(VALID_RESEARCH_TYPES))}."
-        )
+    query = request.query
 
-    # Email format validation for OSINT
-    if request.type == "email":
-        from agents.email_osint import validate_email
-        is_valid, val_err = validate_email(query)
-        if not is_valid:
+    # Email format validation for OSINT and Email Intelligence
+    if request.type in ("email", "email_intelligence"):
+        from intelligence.email import EmailValidatorAgent
+        val_res = EmailValidatorAgent.validate(query)
+        if not val_res.valid:
             raise HTTPException(
                 status_code=422,
-                detail=f"Malformed email input: {val_err}"
+                detail=f"Malformed email input: {val_res.error}"
             )
+
+    if request.type in {"startup", "linkedin", "youtube"} and ("://" in query or "." in query):
+        try:
+            query = validate_public_url(query)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     job_id = "job_" + os.urandom(4).hex()
 
-    # Credit & Usage Check
-    check_and_deduct_credits(workspace, user, job_id, action=f"research_{request.type}", credits_cost=1, db=db)
+    logger.info("research_job_created", research_type=request.type, job_id=job_id, workspace_id=workspace.id)
 
-    logger.info(f"Starting {request.type} research for: {query} (Job ID: {job_id}, Workspace: {workspace.id})")
-
-    # 1. Create database job record with multi-tenant ownership
+    # Create the report and usage entry atomically so PostgreSQL foreign keys and
+    # concurrent credit checks cannot leave partial state.
     new_job = Report(
         job_id=job_id,
         user_id=user.id,
@@ -429,14 +465,33 @@ async def start_research(
         status="pending",
         stage="queued",
     )
-    db.add(new_job)
-    db.commit()
+    try:
+        db.add(new_job)
+        db.flush()
+        check_and_deduct_credits(workspace, user, job_id, action=f"research_{request.type}", credits_cost=1, db=db)
+        db.commit()
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        logger.exception("research_job_database_write_failed", job_id=job_id)
+        raise HTTPException(status_code=503, detail="Research storage is temporarily unavailable")
 
     # 2. Push into durable queue (or graceful fallback for local development)
     enqueue_res = enqueue_research_job(job_id, query, request.type)
     if not enqueue_res.get("queued"):
-        logger.info(f"Running job {job_id} via local background executor (Redis queue unavailable)")
-        background_tasks.add_task(execute_research_job, job_id, query, request.type)
+        if ALLOW_LOCAL_QUEUE_FALLBACK:
+            logger.warning("queue_unavailable_using_local_fallback", job_id=job_id)
+            background_tasks.add_task(execute_research_job, job_id, query, request.type)
+        else:
+            new_job.status = "failed"
+            new_job.stage = "failed"
+            new_job.error_message = "Research queue is temporarily unavailable"
+            workspace.credits_used = max(0, workspace.credits_used - 1)
+            db.query(UsageLog).filter(UsageLog.job_id == job_id).delete()
+            db.commit()
+            raise HTTPException(status_code=503, detail="Research queue is temporarily unavailable")
 
     return ResearchResponse(job_id=job_id, status="pending")
 

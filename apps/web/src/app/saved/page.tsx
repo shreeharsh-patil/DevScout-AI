@@ -5,18 +5,14 @@ import Link from "next/link";
 import {
   Bookmark,
   Search,
-  ExternalLink,
   Edit2,
-  Trash2,
   Check,
   X,
   Clock,
   Download,
-  Building2,
-  FileText,
 } from "lucide-react";
 import { useAuth } from "@/context/auth-context";
-import { getSavedReports, updateReport, deleteJob, getReport, HistoryItem } from "@/lib/api";
+import { getSavedReports, updateReport, getReport, HistoryItem } from "@/lib/api";
 import Header from "@/components/layout/header";
 import Footer from "@/components/layout/footer";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -31,21 +27,25 @@ export default function SavedReportsPage() {
   const [editingJobId, setEditingJobId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState("");
   const [searchFilter, setSearchFilter] = useState("");
+  const [loadError, setLoadError] = useState("");
 
   const loadSavedReports = useCallback(async () => {
     try {
       setIsLoading(true);
+      setLoadError("");
       const data = await getSavedReports();
       setSavedJobs(data);
     } catch (err) {
       console.error("Failed to load saved reports:", err);
+      setLoadError(err instanceof Error ? err.message : "Failed to load saved reports.");
     } finally {
       setIsLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    loadSavedReports();
+    const timer = window.setTimeout(() => void loadSavedReports(), 0);
+    return () => window.clearTimeout(timer);
   }, [loadSavedReports]);
 
   const handleUnsave = async (jobId: string) => {
@@ -133,7 +133,14 @@ export default function SavedReportsPage() {
           </div>
         </div>
 
-        {isLoading ? (
+        {loadError ? (
+          <div role="alert" className="py-20 text-center text-sm text-red-400">
+            <p>{loadError}</p>
+            <Button variant="outline" size="sm" className="mt-4" onClick={() => void loadSavedReports()}>
+              Try again
+            </Button>
+          </div>
+        ) : isLoading ? (
           <div className="p-16 text-center text-xs text-neutral-500 font-mono">
             Loading saved reports...
           </div>

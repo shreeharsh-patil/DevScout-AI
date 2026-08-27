@@ -143,11 +143,15 @@ export default function IdentityProfile({ analysis, researcher }: Props) {
         <div className="bg-gradient-to-r from-indigo-900/30 via-purple-900/20 to-transparent p-6">
           <div className="flex items-start gap-5">
             {gravatar.avatar_url ? (
-              <img
-                src={gravatar.avatar_url}
-                alt="Avatar"
-                className="w-20 h-20 rounded-full border-2 border-indigo-500/30 object-cover shrink-0"
-              />
+              <>
+                {/* Dynamic OSINT avatars cannot use a fixed Next.js remote host allowlist. */}
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={gravatar.avatar_url}
+                  alt="Avatar"
+                  className="w-20 h-20 rounded-full border-2 border-indigo-500/30 object-cover shrink-0"
+                />
+              </>
             ) : (
               <div className="w-20 h-20 rounded-full bg-neutral-900 border-2 border-neutral-700 flex items-center justify-center shrink-0">
                 <User className="w-8 h-8 text-neutral-600" />
@@ -287,7 +291,10 @@ export default function IdentityProfile({ analysis, researcher }: Props) {
               return (
                 <div key={i} className="flex items-start gap-3 p-3 rounded-lg bg-neutral-900/50 border border-neutral-800">
                   {acc.avatar_url ? (
-                    <img src={acc.avatar_url} alt="" className="w-8 h-8 rounded-full mt-0.5" />
+                    <>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={acc.avatar_url} alt="" className="w-8 h-8 rounded-full mt-0.5" />
+                    </>
                   ) : (
                     <div className="w-8 h-8 rounded-full bg-neutral-800 flex items-center justify-center mt-0.5">
                       <GithubIcon className="w-4 h-4 text-neutral-500" />

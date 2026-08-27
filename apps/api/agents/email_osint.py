@@ -1,12 +1,12 @@
-import hashlib
-import json
+﻿import hashlib
 import os
 import re
 import time
 import requests
+import http_client
 from loguru import logger
 from dotenv import load_dotenv
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 
 load_dotenv()
 
@@ -348,7 +348,7 @@ class EmailOSINT:
             result["hash"] = email_hash
 
             avatar_url = f"https://www.gravatar.com/avatar/{email_hash}?d=404&s=200"
-            resp = requests.get(avatar_url, timeout=8)
+            resp = http_client.get(avatar_url, timeout=8)
             if resp.status_code == 200:
                 result["has_profile"] = True
                 result["confidence_category"] = CONFIDENCE_VERIFIED
@@ -356,7 +356,7 @@ class EmailOSINT:
                 result["profile_url"] = f"https://www.gravatar.com/{email_hash}"
                 result["evidence"] = f"Cryptographic MD5 hash ({email_hash}) verified on Gravatar registry."
 
-                profile_resp = requests.get(
+                profile_resp = http_client.get(
                     f"https://www.gravatar.com/{email_hash}.json",
                     timeout=8
                 )
@@ -389,14 +389,14 @@ class EmailOSINT:
 
         try:
             data = None
-            whois_resp = requests.get(
+            whois_resp = http_client.get(
                 f"https://rdap.verisign.com/com/v1/domain/{domain}",
                 timeout=10
             )
             if whois_resp.status_code == 200:
                 data = whois_resp.json()
             else:
-                fallback = requests.get(
+                fallback = http_client.get(
                     f"https://www.rdap.net/domain/{domain}",
                     timeout=10
                 )
@@ -452,7 +452,7 @@ class EmailOSINT:
             prefix = email_hash[:5]
             suffix = email_hash[5:]
 
-            hibp_resp = requests.get(
+            hibp_resp = http_client.get(
                 f"https://api.pwnedpasswords.com/range/{prefix}",
                 timeout=10,
                 headers={"hibp-api-key": os.getenv("HIBP_API_KEY", "")}
@@ -471,7 +471,7 @@ class EmailOSINT:
                             "evidence": f"K-Anonymity SHA-1 hash prefix {prefix} matched breach database ({count} occurrences)."
                         })
 
-            breach_resp = requests.get(
+            breach_resp = http_client.get(
                 f"https://haveibeenpwned.com/api/v3/breachedaccount/{requests.utils.quote(email)}?truncateResponse=true",
                 timeout=10,
                 headers={
@@ -509,7 +509,7 @@ class EmailOSINT:
 
         try:
             search_url = f"https://s.jina.ai/{requests.utils.quote(email)}"
-            resp = requests.get(search_url, timeout=30)
+            resp = http_client.get(search_url, timeout=30)
             if resp.status_code == 200:
                 raw = resp.text
                 mentions = self._parse_search_results(raw, email)
@@ -517,7 +517,7 @@ class EmailOSINT:
 
             encoded_email = requests.utils.quote(f'"{email}"')
             search_url2 = f"https://s.jina.ai/{encoded_email}"
-            resp2 = requests.get(search_url2, timeout=30)
+            resp2 = http_client.get(search_url2, timeout=30)
             if resp2.status_code == 200 and resp2.text != raw:
                 mentions2 = self._parse_search_results(resp2.text, email)
                 existing_titles = {r.get("title") for r in results}
@@ -593,7 +593,7 @@ class EmailOSINT:
 
         for platform_name, search_url in platforms:
             try:
-                resp = requests.get(search_url, timeout=25)
+                resp = http_client.get(search_url, timeout=25)
                 if resp.status_code == 200 and email.lower() in resp.text.lower():
                     lines = resp.text.split("\n")
                     title = ""
@@ -625,7 +625,7 @@ class EmailOSINT:
 
         try:
             search_query = f"site:news.ycombinator.com {email}"
-            resp = requests.get(
+            resp = http_client.get(
                 f"https://s.jina.ai/{requests.utils.quote(search_query)}",
                 timeout=25
             )
@@ -635,7 +635,7 @@ class EmailOSINT:
                     results.append(mention)
 
             search_query2 = f"site:techcrunch.com {email}"
-            resp2 = requests.get(
+            resp2 = http_client.get(
                 f"https://s.jina.ai/{requests.utils.quote(search_query2)}",
                 timeout=25
             )
@@ -662,7 +662,7 @@ class EmailOSINT:
         }
 
         try:
-            pgp_resp = requests.get(
+            pgp_resp = http_client.get(
                 f"https://keyserver.ubuntu.com/pks/lookup?op=index&search={requests.utils.quote(email)}",
                 timeout=15,
                 headers={"user-agent": "DevScoutAI/2.0"}
@@ -688,7 +688,7 @@ class EmailOSINT:
 
         try:
             search_query = f"site:pastebin.com {email}"
-            resp = requests.get(
+            resp = http_client.get(
                 f"https://s.jina.ai/{requests.utils.quote(search_query)}",
                 timeout=25
             )
@@ -714,7 +714,7 @@ class EmailOSINT:
                 **self.headers,
                 "Accept": "application/vnd.github.cloak-preview+json",
             }
-            commit_resp = requests.get(
+            commit_resp = http_client.get(
                 f"https://api.github.com/search/commits?q=author-email:{email}&per_page=10&sort=author-date",
                 headers=commit_headers,
                 timeout=15,
@@ -740,7 +740,7 @@ class EmailOSINT:
                         "discovery_method": "commit_author_email",
                         "confidence_category": CONFIDENCE_VERIFIED,
                         "is_confirmed": True,
-                        "confidence": "Verified (Public Commit History — exact author email match)",
+                        "confidence": "Verified (Public Commit History â€” exact author email match)",
                         "evidence": f"Commit author/committer email in GitHub repository history directly matches '{email}'.",
                         "profile_url": f"https://github.com/{login}"
                     }
@@ -750,7 +750,7 @@ class EmailOSINT:
 
         # Strategy 2: Profile Email Match (VERIFIED - public email on profile)
         try:
-            profile_resp = requests.get(
+            profile_resp = http_client.get(
                 f"https://api.github.com/search/users?q={requests.utils.quote(email)}+in:email&per_page=5",
                 headers=self.headers,
                 timeout=10,
@@ -768,7 +768,7 @@ class EmailOSINT:
                             "discovery_method": "profile_email_search",
                             "confidence_category": CONFIDENCE_VERIFIED,
                             "is_confirmed": True,
-                            "confidence": "Verified (Profile Email Match — public email on profile)",
+                            "confidence": "Verified (Profile Email Match â€” public email on profile)",
                             "evidence": f"GitHub user profile explicitly lists matching email '{email}'.",
                             "profile_url": f"https://github.com/{login}"
                         }
@@ -788,7 +788,7 @@ class EmailOSINT:
                 if not candidate or candidate in found_logins:
                     continue
                 try:
-                    guess_resp = requests.get(
+                    guess_resp = http_client.get(
                         f"https://api.github.com/users/{requests.utils.quote(candidate)}",
                         headers=self.headers,
                         timeout=8,
@@ -840,7 +840,7 @@ class EmailOSINT:
                                     "discovery_method": "unverified_handle_prefix_guess",
                                     "confidence_category": CONFIDENCE_CANDIDATE,
                                     "is_confirmed": False,
-                                    "confidence": "Candidate (Unverified Guess — handle matches email prefix only)",
+                                    "confidence": "Candidate (Unverified Guess â€” handle matches email prefix only)",
                                     "evidence": f"GitHub handle '{login}' matches email prefix '{candidate}', but no cryptographic or email link was verified. Treat as an unconfirmed candidate lead only.",
                                     "profile_url": f"https://github.com/{login}"
                                 }
@@ -890,7 +890,7 @@ class EmailOSINT:
 
         try:
             domain_authority = ".".join(domain.split(".")[-2:]) if "." in domain else domain
-            company_resp = requests.get(
+            company_resp = http_client.get(
                 f"https://s.jina.ai/{requests.utils.quote(domain_authority + ' about company crunchbase')}",
                 timeout=20
             )

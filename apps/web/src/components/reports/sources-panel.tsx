@@ -5,6 +5,7 @@ import { ExternalLink, ShieldCheck, Database, Globe, GitBranch, Package, PlayCir
 import type { ResearchSource } from "@/types/research";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+import { safeExternalUrl } from "@/lib/utils";
 
 interface SourcesPanelProps {
   sources?: ResearchSource[];
@@ -60,6 +61,7 @@ export function SourcesPanel({ sources }: SourcesPanelProps) {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {sources.map((src, index) => {
             const sid = src.source_id || String(index + 1);
+            const safeUrl = safeExternalUrl(src.url);
             return (
               <div
                 key={sid}
@@ -97,10 +99,10 @@ export function SourcesPanel({ sources }: SourcesPanelProps) {
                   )}
                 </div>
 
-                {src.url && (
+                {safeUrl && (
                   <div className="mt-2 pt-2 border-t border-neutral-800/50 flex items-center justify-between">
                     <a
-                      href={src.url}
+                      href={safeUrl}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-[11px] text-indigo-400 hover:text-indigo-300 flex items-center gap-1 truncate max-w-[280px]"

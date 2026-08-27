@@ -1,13 +1,15 @@
-import subprocess
+﻿import subprocess
 import json
 import time
 import re
 import requests
+import http_client
 from loguru import logger
 import os
 from dotenv import load_dotenv
 
 from sources import SourceCollector
+from security import validate_public_url
 
 load_dotenv()
 
@@ -57,11 +59,12 @@ class ResearcherAgent:
 
     def fetch_web_page(self, url: str) -> str:
         """Reads a webpage using Jina Reader."""
-        logger.info(f"Fetching web page: {url}")
+        logger.info("Fetching public web page")
         try:
-            clean_url = url.replace("https://", "").replace("http://", "")
+            safe_url = validate_public_url(url)
+            clean_url = safe_url.replace("https://", "").replace("http://", "")
             jina_url = f"https://r.jina.ai/https://{clean_url}"
-            response = requests.get(jina_url, timeout=45)
+            response = http_client.get(jina_url, timeout=45)
             if response.status_code == 200:
                 return response.text
             else:
@@ -80,7 +83,7 @@ class ResearcherAgent:
         logger.info(f"Searching GitHub: {query}")
         try:
             url = f"https://api.github.com/search/repositories?q={query}&sort=stars&order=desc&per_page=5"
-            response = requests.get(url, headers=self.headers, timeout=10)
+            response = http_client.get(url, headers=self.headers, timeout=10)
             if response.status_code == 200:
                 result = response.json()
                 _cache_set(_github_search_cache, query, result)
@@ -103,13 +106,13 @@ class ResearcherAgent:
 
         logger.info(f"Fetching GitHub profile for: {handle}")
         try:
-            profile_resp = requests.get(f"https://api.github.com/users/{handle}", headers=self.headers, timeout=10)
+            profile_resp = http_client.get(f"https://api.github.com/users/{handle}", headers=self.headers, timeout=10)
             if profile_resp.status_code != 200:
                 logger.error(f"Failed to find GitHub user {handle}")
                 return {}
             user_data = profile_resp.json()
             
-            repo_resp = requests.get(
+            repo_resp = http_client.get(
                 f"https://api.github.com/users/{handle}/repos?sort=updated&per_page=10",
                 headers=self.headers, timeout=10
             )
@@ -197,12 +200,11 @@ class ResearcherAgent:
     def fetch_stack_overflow_user(self, email: str) -> dict:
         """Searches for a Stack Overflow user by email hash (MD5)."""
         import hashlib
-        logger.info(f"Searching Stack Overflow for email: {email}")
+        logger.info("Searching Stack Overflow identity signal")
         try:
             # SO doesn't allow direct email search, but Gravatar uses MD5 hash
             email_hash = hashlib.md5(email.strip().lower().encode()).hexdigest()
             # This is a heuristic: check if a user exists with this hash
-            url = f"https://api.stackexchange.com/2.3/users?filter=!LnN.q_U)B7yZ5X.r)Cg*v.&site=stackoverflow&key=U4DMV*8nv6v6h9Z*44nOnw(("
             # SO API usually requires an email check via a different method or just finding accounts with matching data
             # For now, we'll search for users with matching display names or just use it as a placeholder for expansion
             return {"hash": email_hash, "note": "Stack Overflow direct email search is restricted; hash generated for Gravatar mapping."}
@@ -218,7 +220,7 @@ class ResearcherAgent:
         from .email_osint import EmailOSINT
         engine = EmailOSINT()
         profile = engine.run_all(email)
-        logger.info(f"Email OSINT complete for {email} — completeness: {profile.get('profile_completeness', {}).get('score', 0)}%")
+        logger.info(f"Email OSINT complete for {email} â€” completeness: {profile.get('profile_completeness', {}).get('score', 0)}%")
         return profile
 
     def _search_hackernews(self, keyword: str, limit: int = 10) -> str:
@@ -226,7 +228,7 @@ class ResearcherAgent:
         logger.info(f"Fetching Hacker News data for: {keyword}")
         try:
             url = f"https://hn.algolia.com/api/v1/search?query={requests.utils.quote(keyword)}&tags=story&hitsPerPage={limit}"
-            resp = requests.get(url, timeout=15)
+            resp = http_client.get(url, timeout=15)
             if resp.status_code == 200:
                 hits = resp.json().get("hits", [])
                 summaries = []
@@ -234,7 +236,7 @@ class ResearcherAgent:
                     title = hit.get("title", "")
                     points = hit.get("points", 0)
                     story_url = hit.get("url") or f"https://news.ycombinator.com/item?id={hit.get('objectID', '')}"
-                    summaries.append(f"• {title} ({points} pts) — {story_url}")
+                    summaries.append(f"â€¢ {title} ({points} pts) â€” {story_url}")
                 return "\n".join(summaries)
             return ""
         except Exception as e:
@@ -246,7 +248,7 @@ class ResearcherAgent:
         logger.info(f"Fetching Reddit data for: {keyword}")
         try:
             url = f"https://www.reddit.com/search.json?q={requests.utils.quote(keyword)}&sort=relevance&limit={limit}&type=link"
-            resp = requests.get(url, headers={"User-Agent": "DevScoutAI/1.0"}, timeout=15)
+            resp = http_client.get(url, headers={"User-Agent": "DevScoutAI/1.0"}, timeout=15)
             if resp.status_code == 200:
                 posts = resp.json().get("data", {}).get("children", [])
                 summaries = []
@@ -255,7 +257,7 @@ class ResearcherAgent:
                     title = d.get("title", "")
                     subreddit = d.get("subreddit_name_prefixed", "")
                     score = d.get("score", 0)
-                    summaries.append(f"[{subreddit}] {title} (👍 {score})")
+                    summaries.append(f"[{subreddit}] {title} (ðŸ‘ {score})")
                 return "\n".join(summaries)
             return ""
         except Exception as e:
@@ -300,7 +302,7 @@ class ResearcherAgent:
         
         gh_summary = ""
         if github_text.get("items"):
-            gh_summary = "\n".join([f"• {r['full_name']} ({r['stargazers_count']}⭐): {r['description']}" for r in github_text['items'][:3]])
+            gh_summary = "\n".join([f"â€¢ {r['full_name']} ({r['stargazers_count']}â­): {r['description']}" for r in github_text['items'][:3]])
 
         collector = SourceCollector()
         collector.add_source(
@@ -343,7 +345,7 @@ class ResearcherAgent:
         logger.info(f"Searching web via Jina: {query}")
         try:
             jina_search_url = f"https://s.jina.ai/{requests.utils.quote(query)}"
-            resp = requests.get(jina_search_url, timeout=30)
+            resp = http_client.get(jina_search_url, timeout=30)
             if resp.status_code == 200:
                 raw_text = resp.text[:5000]
                 collector = SourceCollector()
@@ -371,11 +373,12 @@ class ResearcherAgent:
 
     def fetch_linkedin_profile(self, url: str) -> str:
         """Fetches a public LinkedIn profile page via Jina Reader."""
-        logger.info(f"Fetching LinkedIn profile: {url}")
+        logger.info("Fetching public LinkedIn profile")
         try:
-            clean_url = url.replace("https://", "").replace("http://", "")
+            safe_url = validate_public_url(url, allowed_hosts={"linkedin.com"})
+            clean_url = safe_url.replace("https://", "").replace("http://", "")
             jina_url = f"https://r.jina.ai/https://{clean_url}"
-            resp = requests.get(jina_url, timeout=45)
+            resp = http_client.get(jina_url, timeout=45)
             return resp.text if resp.status_code == 200 else ""
         except Exception as e:
             logger.error(f"LinkedIn fetch failed: {e}")
@@ -402,7 +405,7 @@ class ResearcherAgent:
 
         try:
             # Repo metadata
-            repo_resp = requests.get(
+            repo_resp = http_client.get(
                 f"https://api.github.com/repos/{owner}/{repo}",
                 headers=self.headers, timeout=10
             )
@@ -413,7 +416,7 @@ class ResearcherAgent:
 
 
             # Top contributors
-            contrib_resp = requests.get(
+            contrib_resp = http_client.get(
                 f"https://api.github.com/repos/{owner}/{repo}/contributors?per_page=5",
                 headers=self.headers, timeout=10
             )
@@ -426,7 +429,7 @@ class ResearcherAgent:
                     })
 
             # Language breakdown
-            lang_resp = requests.get(
+            lang_resp = http_client.get(
                 f"https://api.github.com/repos/{owner}/{repo}/languages",
                 headers=self.headers, timeout=10
             )
@@ -510,8 +513,8 @@ class ResearcherAgent:
         logger.info(f"Fetching repository intelligence: {repo_path}")
 
         try:
-            # ── 1. Core repository metadata ──
-            repo_resp = requests.get(
+            # â”€â”€ 1. Core repository metadata â”€â”€
+            repo_resp = http_client.get(
                 f"https://api.github.com/repos/{repo_path}",
                 headers=self.headers, timeout=10
             )
@@ -522,10 +525,10 @@ class ResearcherAgent:
 
             license_info = repo_data.get("license") or {}
 
-            # ── 2. Contributors (top 30 for meaningful analysis) ──
+            # â”€â”€ 2. Contributors (top 30 for meaningful analysis) â”€â”€
             contributors = []
             try:
-                contrib_resp = requests.get(
+                contrib_resp = http_client.get(
                     f"https://api.github.com/repos/{repo_path}/contributors?per_page=30",
                     headers=self.headers, timeout=10
                 )
@@ -539,10 +542,10 @@ class ResearcherAgent:
             except Exception:
                 pass
 
-            # ── 3. Language breakdown ──
+            # â”€â”€ 3. Language breakdown â”€â”€
             languages = {}
             try:
-                lang_resp = requests.get(
+                lang_resp = http_client.get(
                     f"https://api.github.com/repos/{repo_path}/languages",
                     headers=self.headers, timeout=10
                 )
@@ -551,10 +554,10 @@ class ResearcherAgent:
             except Exception:
                 pass
 
-            # ── 4. Recent commits (last 10) ──
+            # â”€â”€ 4. Recent commits (last 10) â”€â”€
             recent_commits = []
             try:
-                commits_resp = requests.get(
+                commits_resp = http_client.get(
                     f"https://api.github.com/repos/{repo_path}/commits?per_page=10",
                     headers=self.headers, timeout=10
                 )
@@ -570,10 +573,10 @@ class ResearcherAgent:
             except Exception:
                 pass
 
-            # ── 5. Releases (last 10) ──
+            # â”€â”€ 5. Releases (last 10) â”€â”€
             releases = []
             try:
-                releases_resp = requests.get(
+                releases_resp = http_client.get(
                     f"https://api.github.com/repos/{repo_path}/releases?per_page=10",
                     headers=self.headers, timeout=10
                 )
@@ -588,10 +591,10 @@ class ResearcherAgent:
             except Exception:
                 pass
 
-            # ── 6. Open issues (last 10, with labels) ──
+            # â”€â”€ 6. Open issues (last 10, with labels) â”€â”€
             open_issues_list = []
             try:
-                issues_resp = requests.get(
+                issues_resp = http_client.get(
                     f"https://api.github.com/repos/{repo_path}/issues?state=open&per_page=10&sort=updated",
                     headers=self.headers, timeout=10
                 )
@@ -603,17 +606,17 @@ class ResearcherAgent:
                         open_issues_list.append({
                             "number": iss.get("number", 0),
                             "title": iss.get("title", "").strip()[:100],
-                            "labels": [l.get("name", "") for l in iss.get("labels", [])],
+                        "labels": [label.get("name", "") for label in iss.get("labels", [])],
                             "created_at": iss.get("created_at", ""),
                             "comments": iss.get("comments", 0),
                         })
             except Exception:
                 pass
 
-            # ── 7. Pull requests (last 10, open) ──
+            # â”€â”€ 7. Pull requests (last 10, open) â”€â”€
             pull_requests = []
             try:
-                pr_resp = requests.get(
+                pr_resp = http_client.get(
                     f"https://api.github.com/repos/{repo_path}/pulls?state=open&per_page=10&sort=updated",
                     headers=self.headers, timeout=10
                 )
@@ -630,10 +633,10 @@ class ResearcherAgent:
             except Exception:
                 pass
 
-            # ── 8. README ──
+            # â”€â”€ 8. README â”€â”€
             readme_content = ""
             try:
-                readme_resp = requests.get(
+                readme_resp = http_client.get(
                     f"https://api.github.com/repos/{repo_path}/readme",
                     headers={**self.headers, "Accept": "application/vnd.github.v3.raw"},
                     timeout=15
@@ -643,10 +646,10 @@ class ResearcherAgent:
             except Exception:
                 pass
 
-            # ── 9. Project structure (root directory listing) ──
+            # â”€â”€ 9. Project structure (root directory listing) â”€â”€
             root_contents = []
             try:
-                contents_resp = requests.get(
+                contents_resp = http_client.get(
                     f"https://api.github.com/repos/{repo_path}/contents/",
                     headers=self.headers, timeout=10
                 )
@@ -660,7 +663,7 @@ class ResearcherAgent:
             except Exception:
                 pass
 
-            # ── 10. Dependencies (discoverable from common manifest files) ──
+            # â”€â”€ 10. Dependencies (discoverable from common manifest files) â”€â”€
             dependencies: dict = {}
             manifest_files = [
                 "package.json",
@@ -673,7 +676,7 @@ class ResearcherAgent:
             ]
             for mf in manifest_files:
                 try:
-                    dep_resp = requests.get(
+                    dep_resp = http_client.get(
                         f"https://api.github.com/repos/{repo_path}/contents/{mf}",
                         headers={**self.headers, "Accept": "application/vnd.github.v3.raw"},
                         timeout=10
@@ -684,7 +687,7 @@ class ResearcherAgent:
                 except Exception:
                     continue
 
-            # ── 11. Computed fields ──
+            # â”€â”€ 11. Computed fields â”€â”€
             from datetime import datetime, timezone
             created = repo_data.get("created_at", "")
             pushed = repo_data.get("pushed_at", "")
@@ -707,7 +710,7 @@ class ResearcherAgent:
             # Total open PRs count (from repo metadata, not the paginated list)
             open_prs_count = 0
             try:
-                pr_search_resp = requests.get(
+                pr_search_resp = http_client.get(
                     f"https://api.github.com/search/issues?q=repo:{repo_path}+type:pr+state:open&per_page=1",
                     headers=self.headers, timeout=10
                 )
@@ -738,7 +741,6 @@ class ResearcherAgent:
                 "last_activity_days": last_activity_days,
                 # Detailed data
                 "languages": languages,
-                "topics": repo_data.get("topics", []),
                 "contributors": contributors,
                 "recent_commits": recent_commits,
                 "releases": releases,
@@ -763,7 +765,7 @@ class ResearcherAgent:
         logger.info(f"Fetching npm package: {package_name}")
         result: dict = {}
         try:
-            registry_resp = requests.get(f"https://registry.npmjs.org/{requests.utils.quote(package_name)}", timeout=15)
+            registry_resp = http_client.get(f"https://registry.npmjs.org/{requests.utils.quote(package_name)}", timeout=15)
             if registry_resp.status_code == 200:
                 data = registry_resp.json()
                 latest = data.get("dist-tags", {}).get("latest", "")
@@ -773,7 +775,7 @@ class ResearcherAgent:
                 if isinstance(repo_url, str) and repo_url.endswith(".git"):
                     repo_url = repo_url[:-4]
 
-                dl_resp = requests.get(f"https://api.npmjs.org/downloads/point/last-week/{requests.utils.quote(package_name)}", timeout=10)
+                dl_resp = http_client.get(f"https://api.npmjs.org/downloads/point/last-week/{requests.utils.quote(package_name)}", timeout=10)
                 weekly_dl = dl_resp.json().get("downloads", 0) if dl_resp.status_code == 200 else 0
 
                 collector = SourceCollector()

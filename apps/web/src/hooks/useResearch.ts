@@ -20,13 +20,17 @@ export function useResearch(): UseResearchReturn {
   const [status, setStatus] = useState<ResearchStatus>("idle");
   const [report, setReport] = useState<ResearchReport | null>(null);
   const [errorMessage, setErrorMessage] = useState("");
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const runIdRef = useRef(0);
 
   const clearPoll = useCallback(() => {
     if (pollRef.current) {
-      clearInterval(pollRef.current);
+      clearTimeout(pollRef.current);
       pollRef.current = null;
     }
+    abortRef.current?.abort();
+    abortRef.current = null;
   }, []);
 
   const reset = useCallback(() => {
@@ -41,6 +45,9 @@ export function useResearch(): UseResearchReturn {
       if (!query.trim()) return;
 
       clearPoll();
+      const runId = ++runIdRef.current;
+      const controller = new AbortController();
+      abortRef.current = controller;
 
       // Scroll to dashboard
       document.getElementById("dashboard")?.scrollIntoView({ behavior: "smooth" });
@@ -54,11 +61,12 @@ export function useResearch(): UseResearchReturn {
           query: query.trim(),
           type,
           depth: "standard",
-        });
+        }, controller.signal);
 
         let pollCount = 0;
 
-        pollRef.current = setInterval(async () => {
+        const poll = async () => {
+          if (runId !== runIdRef.current || controller.signal.aborted) return;
           pollCount++;
 
           if (pollCount >= MAX_POLLS) {
@@ -69,7 +77,8 @@ export function useResearch(): UseResearchReturn {
           }
 
           try {
-            const statusData = await getJobStatus(job_id);
+            const statusData = await getJobStatus(job_id, controller.signal);
+            if (runId !== runIdRef.current) return;
 
             if (statusData.status === "rate_limited") {
               clearPoll();
@@ -96,10 +105,17 @@ export function useResearch(): UseResearchReturn {
               clearPoll();
               setStatus("rate_limited");
             }
-            console.error("Poll error:", pollErr);
+            if (!(pollErr instanceof DOMException && pollErr.name === "AbortError")) {
+              console.error("Poll error:", pollErr);
+            }
           }
-        }, POLL_INTERVAL_MS);
+          if (runId === runIdRef.current && !controller.signal.aborted && pollRef.current !== null) {
+            pollRef.current = setTimeout(poll, POLL_INTERVAL_MS);
+          }
+        };
+        pollRef.current = setTimeout(poll, POLL_INTERVAL_MS);
       } catch (e) {
+        if (runId !== runIdRef.current || (e instanceof DOMException && e.name === "AbortError")) return;
         console.error(e);
         if (e instanceof ApiTimeoutError) {
           setStatus("error");
@@ -121,7 +137,9 @@ export function useResearch(): UseResearchReturn {
 
   // Cleanup on unmount
   useEffect(() => {
-    return () => clearPoll();
+    return () => {
+      clearPoll();
+    };
   }, [clearPoll]);
 
   return { status, report, errorMessage, startResearch, reset };

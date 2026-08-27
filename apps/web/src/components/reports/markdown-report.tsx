@@ -2,6 +2,7 @@
 
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { safeExternalUrl } from "@/lib/utils";
 
 interface MarkdownReportProps {
   content: string;
@@ -11,6 +12,7 @@ export default function MarkdownReport({ content }: MarkdownReportProps) {
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
+      skipHtml
       components={{
         h1: ({ children }) => (
           <h1 className="text-2xl font-bold text-white mb-6 border-b border-neutral-800 pb-2">
@@ -47,16 +49,18 @@ export default function MarkdownReport({ content }: MarkdownReportProps) {
         em: ({ children }) => (
           <em className="text-neutral-400 italic">{children}</em>
         ),
-        a: ({ href, children }) => (
-          <a
-            href={href}
+        a: ({ href, children }) => {
+          const safeHref = safeExternalUrl(href);
+          return safeHref ? <a
+            href={safeHref}
             target="_blank"
             rel="noopener noreferrer"
             className="text-indigo-400 hover:underline"
           >
             {children}
-          </a>
-        ),
+          </a> : <span>{children}</span>;
+        },
+        img: ({ alt }) => <span className="text-neutral-500">[Image: {alt || "external image"}]</span>,
         blockquote: ({ children }) => (
           <blockquote className="border-l-2 border-indigo-500 pl-4 my-4 text-neutral-400 italic">
             {children}

@@ -28,7 +28,9 @@ class Config:
     }
 
     def __init__(self, config_path: Optional[Path] = None):
-        self.config_path = Path(config_path) if config_path else self.CONFIG_FILE
+        configured_dir = os.getenv("AGENT_REACH_CONFIG_DIR")
+        default_file = Path(configured_dir) / "config.yaml" if configured_dir else self.CONFIG_FILE
+        self.config_path = Path(config_path) if config_path else default_file
         self.config_dir = self.config_path.parent
         self.data: dict = {}
         self._ensure_dir()

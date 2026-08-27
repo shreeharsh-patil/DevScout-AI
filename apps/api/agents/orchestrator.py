@@ -27,7 +27,7 @@ class AgentOrchestrator:
         research_type: str,
         on_stage_change: Optional[Callable[[str], None]] = None
     ) -> Dict:
-        logger.info(f"Orchestrator starting pipeline for {research_type}: {query}")
+        logger.info("orchestrator_pipeline_started", research_type=research_type)
         
         def _notify_stage(stage: str):
             if on_stage_change:
@@ -69,13 +69,25 @@ class AgentOrchestrator:
                 _notify_stage("reporting")
                 report = self.reporter.generate_markdown_report(analysis, research_type)
 
-            elif research_type == "email":
-                raw_data = self.researcher.search_email_osint(query)
-                _notify_stage("analyzing")
-                analysis = self.analyzer.analyze_email(raw_data)
-                analysis["sources"] = raw_data.get("sources", [])
-                _notify_stage("reporting")
-                report = self.reporter.generate_markdown_report(analysis, research_type)
+            elif research_type in ("email_intelligence", "email"):
+                from intelligence.email import EmailIntelligenceOrchestrator
+                email_orch = EmailIntelligenceOrchestrator(on_stage_change=_notify_stage)
+                intel_result = email_orch.execute(query)
+                raw_data = intel_result.model_dump()
+                analysis = {
+                    "email": intel_result.email,
+                    "confidence": intel_result.confidence.model_dump(),
+                    "validation": intel_result.validation.model_dump(),
+                    "accounts": [a.model_dump() for a in intel_result.account_discovery],
+                    "footprint": intel_result.developer_footprint.model_dump(),
+                    "web_mentions": [m.model_dump() for m in intel_result.web_mentions],
+                    "breaches": [b.model_dump() for b in intel_result.breaches],
+                    "username_candidates": [u.model_dump() for u in intel_result.username_candidates],
+                    "identity_signals": intel_result.identity_signals.model_dump(),
+                    "sources": intel_result.sources
+                }
+                report = intel_result.report_markdown
+
 
             elif research_type == "youtube":
                 raw_data = self.researcher.fetch_youtube_info(query)
@@ -166,8 +178,17 @@ class AgentOrchestrator:
             else:
                 raise ValueError(f"Unsupported research type: {research_type}")
 
+            if not isinstance(raw_data, dict) or not isinstance(analysis, dict):
+                raise ValueError("Research pipeline returned an invalid structured result")
+            if not isinstance(report, str):
+                raise ValueError("Report generator returned a non-text response")
+            if len(report) > 2_000_000:
+                raise ValueError("Generated report exceeded the storage limit")
+
             # Ensure sources are propagated
             sources = analysis.get("sources") or raw_data.get("sources") or []
+            if not isinstance(sources, list):
+                sources = []
             analysis["sources"] = sources
 
             _notify_stage("completed")
@@ -194,4 +215,3 @@ class AgentOrchestrator:
                 "status": "failed",
                 "error": str(e)
             }
-

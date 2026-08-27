@@ -16,7 +16,7 @@ class ReporterAgent:
             else:
                 md_content += f"## Developer Score: {analysis.get('score', 'N/A')}/100\n\n"
                 md_content += f"### Summary\n{analysis.get('summary', '')}\n\n"
-                md_content += f"### Tech Stack\n"
+                md_content += "### Tech Stack\n"
                 for tech in analysis.get('tech_stack', []):
                     md_content += f"- {tech}\n"
                 md_content += f"\n### Deep Insights\n{analysis.get('raw_insights', '')}\n"
@@ -38,10 +38,10 @@ class ReporterAgent:
             email = analysis.get("email", "Unknown")
 
             if analysis.get("status") == "invalid_email":
-                md_content += f"# Input Validation Error\n\n"
+                md_content += "# Input Validation Error\n\n"
                 md_content += f"**Target Query:** `{email}`\n\n"
                 md_content += f"> ⚠️ **Error:** {analysis.get('summary', 'Invalid email address.')}\n\n"
-                md_content += f"Please verify the email format (e.g. `user@example.com`) and try again.\n"
+                md_content += "Please verify the email format (e.g. `user@example.com`) and try again.\n"
                 return md_content
 
             domain = analysis.get("domain", "")
@@ -56,10 +56,9 @@ class ReporterAgent:
             social_profiles = analysis.get("social_profiles", [])
             confirmed_accounts = analysis.get("confirmed_accounts", [])
             candidate_accounts = analysis.get("candidate_accounts", [])
-            github_accounts = analysis.get("github_accounts", [])
             web_mentions = analysis.get("web_mentions", [])
 
-            md_content += f"# Identity Intelligence & OSINT Report\n\n"
+            md_content += "# Identity Intelligence & OSINT Report\n\n"
             md_content += f"**Target Email:** `{email}`\n\n"
 
             # Identity card
@@ -100,7 +99,7 @@ class ReporterAgent:
 
             if gravatar.get("has_profile"):
                 has_confirmed_entries = True
-                md_content += f"### Gravatar Profile `[VERIFIED]`\n"
+                md_content += "### Gravatar Profile `[VERIFIED]`\n"
                 md_content += f"- **Display Name:** {gravatar.get('display_name', 'Exists')}\n"
                 if gravatar.get("evidence"):
                     md_content += f"- **Evidence:** {gravatar['evidence']}\n"
@@ -110,7 +109,7 @@ class ReporterAgent:
 
             if confirmed_accounts:
                 has_confirmed_entries = True
-                md_content += f"### GitHub Confirmed Accounts\n"
+                md_content += "### GitHub Confirmed Accounts\n"
                 for acc in confirmed_accounts:
                     login = acc.get("login", "unknown")
                     conf_cat = acc.get("confidence_category", "verified").upper()
@@ -191,7 +190,7 @@ class ReporterAgent:
 
             # Footer
             md_content += "---\n"
-            md_content += f"*Identity intelligence synthesized by DevScout AI using strictly verified public OSINT sources.*\n"
+            md_content += "*Identity intelligence synthesized by DevScout AI using strictly verified public OSINT sources.*\n"
 
                     
         elif report_type == "youtube":
@@ -306,7 +305,7 @@ class ReporterAgent:
                 weights = analysis.get('weights', {})
 
                 md_content += f"## Repository Score: {score}/100\n\n"
-                md_content += f"*Score components: "
+                md_content += "*Score components: "
                 parts = []
                 for k, v in breakdown.items():
                     w = weights.get(k, 0) * 100
@@ -315,17 +314,17 @@ class ReporterAgent:
                 md_content += " | ".join(parts) + "*\n\n"
 
                 # ── Repository overview ──
-                md_content += f"### Repository Overview\n\n"
+                md_content += "### Repository Overview\n\n"
                 md_content += f"**Name:** [{analysis.get('repo_name', '')}]({analysis.get('repo_url', '')})\n\n"
                 md_content += f"**Description:** {analysis.get('description', 'No description provided.')}\n\n"
                 md_content += f"**Primary Language:** {analysis.get('language', 'Unknown')}\n\n"
                 md_content += f"**License:** {analysis.get('license', 'None')}\n\n"
                 if analysis.get('archived'):
-                    md_content += f"> This repository is **archived** and no longer maintained.\n\n"
+                    md_content += "> This repository is **archived** and no longer maintained.\n\n"
 
                 # ── Key Metrics ──
-                md_content += f"### Key Metrics\n\n"
-                md_content += f"| Metric | Value |\n|---|---|\n"
+                md_content += "### Key Metrics\n\n"
+                md_content += "| Metric | Value |\n|---|---|\n"
                 md_content += f"| ⭐ Stars | {analysis.get('stars', 0):,} |\n"
                 md_content += f"| 🍴 Forks | {analysis.get('forks', 0):,} |\n"
                 md_content += f"| 👀 Watchers | {analysis.get('watchers', 0):,} |\n"
@@ -347,18 +346,18 @@ class ReporterAgent:
                 else:
                     active_str = f"{last_active} days ago — may be inactive"
                 md_content += f"| 🕐 Last Activity | {active_str} |\n"
-                md_content += f"\n"
+                md_content += "\n"
 
                 # ── Topic Tags ──
                 topics = analysis.get('topics', [])
                 if topics:
-                    md_content += f"### Topics\n\n"
+                    md_content += "### Topics\n\n"
                     md_content += " ".join(f"`{t}`" for t in topics[:15]) + "\n\n"
 
                 # ── Technology Stack ──
                 tech_stack = analysis.get('tech_stack', [])
                 if tech_stack:
-                    md_content += f"### Technology Stack\n\n"
+                    md_content += "### Technology Stack\n\n"
                     for t in tech_stack:
                         bar_len = max(1, int(t['percentage'] / 5))
                         bar = "█" * bar_len + "░" * (20 - bar_len)
@@ -367,13 +366,13 @@ class ReporterAgent:
                 else:
                     raw_languages = analysis.get('languages', {})
                     if raw_languages:
-                        md_content += f"### Languages\n\n"
+                        md_content += "### Languages\n\n"
                         for lang, bytes_count in raw_languages.items():
                             md_content += f"- {lang}: {bytes_count:,} bytes\n"
                         md_content += "\n"
 
                 # ── Assessments ──
-                md_content += f"### Assessments\n\n"
+                md_content += "### Assessments\n\n"
                 for key, label in [
                     ('health_assessment', '🏥 Health'),
                     ('maintenance_assessment', '🔧 Maintenance'),
@@ -388,7 +387,7 @@ class ReporterAgent:
                 # ── Notable Strengths ──
                 strengths = analysis.get('notable_strengths', [])
                 if strengths:
-                    md_content += f"### Notable Strengths\n\n"
+                    md_content += "### Notable Strengths\n\n"
                     for s in strengths:
                         md_content += f"- ✅ {s}\n"
                     md_content += "\n"
@@ -396,7 +395,7 @@ class ReporterAgent:
                 # ── Key Risks ──
                 risks = analysis.get('key_risks', [])
                 if risks:
-                    md_content += f"### Key Risks\n\n"
+                    md_content += "### Key Risks\n\n"
                     for r in risks:
                         md_content += f"- ⚠️ {r}\n"
                     md_content += "\n"
@@ -404,13 +403,13 @@ class ReporterAgent:
                 # ── Recommendation ──
                 recommendation = analysis.get('recommendation', '')
                 if recommendation:
-                    md_content += f"### Recommendation\n\n"
+                    md_content += "### Recommendation\n\n"
                     md_content += f"> {recommendation}\n\n"
 
                 # ── Contributors ──
                 contribs = analysis.get('contributors_summary', [])
                 if contribs:
-                    md_content += f"### Top Contributors\n\n"
+                    md_content += "### Top Contributors\n\n"
                     for c in contribs[:10]:
                         md_content += f"- [{c['login']}](https://github.com/{c['login']}) — {c['contributions']:,} commits ({c['percentage']}%)\n"
                     md_content += "\n"
@@ -418,7 +417,7 @@ class ReporterAgent:
                 # ── Recent Commits ──
                 commits = analysis.get('recent_commits', [])
                 if commits:
-                    md_content += f"### Recent Commits\n\n"
+                    md_content += "### Recent Commits\n\n"
                     for c in commits[:8]:
                         md_content += f"- `{c['sha']}` {c['message']} — *{c['author']}* ({c['date'][:10]})\n"
                     md_content += "\n"
@@ -426,7 +425,7 @@ class ReporterAgent:
                 # ── Releases ──
                 rels = analysis.get('releases', [])
                 if rels:
-                    md_content += f"### Releases\n\n"
+                    md_content += "### Releases\n\n"
                     for r in rels[:5]:
                         pre = " *(pre-release)*" if r.get('prerelease') else ""
                         md_content += f"- **{r['tag_name']}** — {r.get('name', '')}{pre} ({r['published_at'][:10] if r.get('published_at') else 'N/A'})\n"
@@ -435,7 +434,7 @@ class ReporterAgent:
                 # ── Open Issues ──
                 issues = analysis.get('open_issues_list', [])
                 if issues:
-                    md_content += f"### Recent Open Issues\n\n"
+                    md_content += "### Recent Open Issues\n\n"
                     for iss in issues[:8]:
                         labels = ", ".join(iss.get('labels', [])[:3])
                         label_badge = f" [{labels}]" if labels else ""
@@ -445,7 +444,7 @@ class ReporterAgent:
                 # ── Pull Requests ──
                 prs = analysis.get('pull_requests', [])
                 if prs:
-                    md_content += f"### Open Pull Requests\n\n"
+                    md_content += "### Open Pull Requests\n\n"
                     for pr in prs[:8]:
                         md_content += f"- #{pr['number']} {pr['title']} — *{pr['user']}* (+{pr.get('additions', 0)}/-{pr.get('deletions', 0)})\n"
                     md_content += "\n"
@@ -456,7 +455,7 @@ class ReporterAgent:
                     dirs = structure.get('directories', [])
                     files = structure.get('files', [])
                     if dirs or files:
-                        md_content += f"### Project Structure\n\n"
+                        md_content += "### Project Structure\n\n"
                         if dirs:
                             md_content += f"**Directories:** {', '.join(dirs[:12])}\n\n"
                         if files:
@@ -465,12 +464,12 @@ class ReporterAgent:
                 # ── README excerpt ──
                 readme = analysis.get('readme_excerpt', '')
                 if readme:
-                    md_content += f"### README Excerpt\n\n"
+                    md_content += "### README Excerpt\n\n"
                     md_content += f"```\n{readme[:1500]}\n```\n\n"
 
                 # ── Footer ──
                 md_content += "---\n"
-                md_content += f"*Repository intelligence synthesized by DevScout AI using GitHub API data. All metrics are derived from retrieved data.*\n"
+                md_content += "*Repository intelligence synthesized by DevScout AI using GitHub API data. All metrics are derived from retrieved data.*\n"
 
         else:
             md_content += "Report generation for this type is not yet implemented.\n"
@@ -487,4 +486,3 @@ class ReporterAgent:
                 md_content += "\n\n" + sources_md + "\n"
 
         return md_content
-

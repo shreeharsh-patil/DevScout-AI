@@ -16,7 +16,6 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/context/auth-context";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 
 export default function Header() {
   const [scrolled, setScrolled] = useState(false);

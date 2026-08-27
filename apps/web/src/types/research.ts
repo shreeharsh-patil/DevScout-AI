@@ -5,6 +5,7 @@ export type ResearchType =
   | "developer"
   | "startup"
   | "email"
+  | "email_intelligence"
   | "youtube"
   | "reddit"
   | "idea"
@@ -14,6 +15,7 @@ export type ResearchType =
   | "hackernews"
   | "github-repo"
   | "repository";
+
 
 export type ResearchStatus = "idle" | "loading" | "success" | "error" | "rate_limited";
 
