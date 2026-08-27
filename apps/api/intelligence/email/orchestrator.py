@@ -7,15 +7,13 @@ aggregating evidence, and generating production-quality intelligence reports.
 
 from __future__ import annotations
 
-import datetime
-from typing import Any, Callable, Dict, List, Optional
+from typing import Callable, Optional
 from loguru import logger
 from sources import SourceCollector
 from .agents import (
     AccountDiscoveryAgent,
     BreachExposureAgent,
     DeveloperFootprintAgent,
-    GravatarAgent,
     UsernameCorrelationAgent,
     WebMentionAgent,
 )
@@ -23,16 +21,13 @@ from .confidence import ConfidenceEngine
 from .identity_resolver import IdentityResolverAgent
 from .models import (
     ConfidenceAssessment,
-    ConfidenceLevel,
-    EmailIntelligenceResult,
-    EmailValidationResult,
+    DeveloperFootprint,
+    FindingStatus,
+    IdentityFinding,
+    IntelligenceReport,
 )
 from .reporter import EmailIntelligenceReporter
 from .validator import EmailValidatorAgent
-
-
-def _utc_now_iso() -> str:
-    return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
 class EmailIntelligenceOrchestrator:
@@ -57,38 +52,37 @@ class EmailIntelligenceOrchestrator:
             except Exception as e:
                 logger.debug(f"Error in on_stage_change callback: {e}")
 
-    def execute(self, email_query: str) -> EmailIntelligenceResult:
+    def execute(self, email_query: str) -> IntelligenceReport:
         source_collector = SourceCollector()
 
         # ── Stage 1: Validating Email ──
         self._set_stage("validating_email")
-        validation = self.validator.validate(email_query)
+        target = self.validator.validate(email_query)
 
-        if not validation.valid:
-            logger.warning(f"[EmailIntelligence] Email validation failed for '{email_query}': {validation.error}")
+        if not target.is_valid:
+            logger.warning(f"[EmailIntelligence] Email validation failed for '{email_query}': {target.validation_error}")
             empty_confidence = ConfidenceAssessment(
-                level=ConfidenceLevel.NO_EVIDENCE,
+                level=FindingStatus.NO_EVIDENCE,
                 score=0,
-                reasons=[f"Validation Error: {validation.error}"]
+                reasons=[f"Validation Error: {target.validation_error}"]
             )
             report_md = (
                 f"# \u274c Email Intelligence: Validation Failed\n\n"
                 f"> **Query**: `{email_query}`  \n"
-                f"> **Reason**: {validation.error}\n\n"
+                f"> **Reason**: {target.validation_error}\n\n"
                 f"Please provide a valid, well-formed email address (e.g. `developer@domain.com`)."
             )
-            return EmailIntelligenceResult(
-                email=email_query,
-                validation=validation,
+            return IntelligenceReport(
+                target=target,
                 confidence=empty_confidence,
                 report_markdown=report_md,
                 status="failed",
-                error=validation.error
+                error=target.validation_error
             )
 
-        email = validation.normalized_email
-        local_part = validation.local_part
-        domain = validation.domain
+        email = target.normalized_email
+        local_part = target.local_part
+        domain = target.domain
 
         # ── Stage 2: Discovering Public Accounts ──
         self._set_stage("discovering_accounts")
@@ -100,7 +94,7 @@ class EmailIntelligenceOrchestrator:
                     source_collector.add_source(
                         title=ev.title,
                         url=ev.url,
-                        platform=ev.platform,
+                        platform=ev.provider,
                         source_type=ev.source_type,
                         snippet=ev.snippet,
                         metadata=ev.raw_data
@@ -123,7 +117,6 @@ class EmailIntelligenceOrchestrator:
                 )
         except Exception as e:
             logger.warning(f"[EmailIntelligence] Developer footprint error: {e}")
-            from .models import DeveloperFootprint
             footprint = DeveloperFootprint()
 
         # ── Stage 4: Searching Public Web Mentions ──
@@ -170,8 +163,13 @@ class EmailIntelligenceOrchestrator:
             )
         except Exception as e:
             logger.warning(f"[EmailIntelligence] Identity correlation error: {e}")
-            from .models import IdentitySignals
-            identity_signals = IdentitySignals()
+            identity_signals = IdentityFinding(
+                provider="identity_resolver",
+                finding_type="identity",
+                status=FindingStatus.NO_EVIDENCE,
+                confidence_level=FindingStatus.NO_EVIDENCE,
+                confidence_score=0.0
+            )
 
         # ── Stage 7: Confidence Assessment & Report Generation ──
         self._set_stage("generating_report")
@@ -179,14 +177,14 @@ class EmailIntelligenceOrchestrator:
             account_findings=account_findings,
             web_mentions=web_mentions_list,
             breaches_count=len(breaches_list),
-            has_domain_ownership=validation.provider_type.value == "custom"
+            has_domain_ownership=target.provider_type.value == "custom"
         )
 
         sources_normalized = source_collector.get_sources()
 
         report_markdown = self.reporter.generate_report(
             email=email,
-            validation=validation,
+            validation=target,
             confidence=confidence,
             accounts=account_findings,
             footprint=footprint,
@@ -200,9 +198,8 @@ class EmailIntelligenceOrchestrator:
 
         self._set_stage("completed")
 
-        return EmailIntelligenceResult(
-            email=email,
-            validation=validation,
+        return IntelligenceReport(
+            target=target,
             confidence=confidence,
             account_discovery=account_findings,
             developer_footprint=footprint,

@@ -17,7 +17,7 @@ dependencies = [
     "requests>=2.31.0,<3.0.0",
     "loguru>=0.7.2,<1.0.0",
     "python-dotenv>=1.0.0,<2.0.0",
-    "google-generativeai>=0.8.0,<1.0.0",
+    "google-genai>=1.0.0,<2.0.0",
     "yt-dlp>=2024.0.0",
     "alembic>=1.13.0,<2.0.0",
     "redis>=5.0.0,<6.0.0",
@@ -38,7 +38,7 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["agents*"]
+include = ["agents*", "intelligence*"]
 
 [tool.ruff]
 target-version = "py310"

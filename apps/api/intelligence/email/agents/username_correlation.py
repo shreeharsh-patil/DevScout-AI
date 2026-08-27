@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 from typing import List, Set
-from ..models import ConfidenceLevel, UsernameCandidate
+from ..models import FindingStatus, UsernameCandidate, utc_now_iso
 
 
 class UsernameCorrelationAgent:
@@ -31,11 +31,18 @@ class UsernameCorrelationAgent:
                 seen.add(u_clean)
                 candidates.append(
                     UsernameCandidate(
+                        provider="username_correlation",
+                        finding_type="username_candidate",
+                        status=FindingStatus.CANDIDATE,
+                        confidence_level=FindingStatus.CANDIDATE,
+                        confidence_score=0.20,
+                        evidence_ids=[],
+                        retrieved_at=utc_now_iso(),
                         username=u_clean,
                         generation_rule=rule,
-                        confidence_level=ConfidenceLevel.CANDIDATE,
                         matched_platforms=[],
-                        evidence_note="Candidate handle derived from email syntax. Unverified without independent public evidence."
+                        evidence_note="Candidate handle derived from email syntax. Unverified without independent public evidence.",
+                        metadata={"rule": rule}
                     )
                 )
 

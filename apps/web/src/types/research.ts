@@ -49,8 +49,10 @@ export interface ResearchJob {
 export interface ResearchReport {
   job_id: string;
   status: string;
+  query?: string;
   stage?: string;
   custom_title?: string;
+
   is_saved?: boolean;
   tags?: string[];
   research_type?: string;

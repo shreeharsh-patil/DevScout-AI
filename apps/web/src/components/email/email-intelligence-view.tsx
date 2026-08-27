@@ -3,9 +3,7 @@
 import React, { useState } from "react";
 import {
   ShieldCheck,
-  ShieldAlert,
   Mail,
-  GitBranch,
   Globe,
   Package,
   CheckCircle2,
@@ -13,21 +11,43 @@ import {
   ExternalLink,
   Lock,
   User,
-  Building,
-  MapPin,
-  Clock,
   Layers,
   Code2,
   FileCode,
   Tag,
   Star,
-  ChevronRight,
   Info,
 } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import type { ResearchReport } from "@/types/research";
+import type { ResearchReport, ResearchSource } from "@/types/research";
+import { safeExternalUrl } from "@/lib/utils";
+
+interface Evidence { snippet?: string; title?: string }
+interface Account {
+  account_identifier?: string; avatar_url?: string; bio?: string; evidence?: Evidence[];
+  method?: string; platform?: string; profile_url?: string; status?: string;
+}
+interface Repository { description?: string; language?: string; name?: string; stars?: number; url?: string }
+interface NpmPackage { description?: string; name?: string; version?: string }
+interface DeveloperFootprint {
+  contributions_summary?: string; npm_packages?: NpmPackage[]; repositories?: Repository[]; top_languages?: string[];
+}
+interface WebMention { domain?: string; snippet?: string; title?: string; url?: string }
+interface Breach { breach_date?: string; breach_name?: string; data_classes?: string[] }
+interface UsernameCandidate { generation_rule?: string; username?: string }
+interface IdentitySignals {
+  ambiguity_note?: string; locations?: string[]; organizations?: string[]; possible_name?: string; websites?: string[];
+}
+interface EmailAnalysis {
+  account_discovery?: Account[]; accounts?: Account[]; breach_status?: string; breaches?: Breach[];
+  confidence?: { level?: string; reasons?: string[]; score?: number };
+  developer_footprint?: DeveloperFootprint; footprint?: DeveloperFootprint;
+  identity_signals?: IdentitySignals; sources?: ResearchSource[]; username_candidates?: UsernameCandidate[];
+  validation?: { disposable?: boolean; email?: string; provider_type?: string }; web_mentions?: WebMention[];
+}
+interface EmailRaw extends EmailAnalysis { analysis?: EmailAnalysis }
 
 interface EmailIntelligenceViewProps {
   report: ResearchReport;
@@ -36,23 +56,23 @@ interface EmailIntelligenceViewProps {
 export default function EmailIntelligenceView({ report }: EmailIntelligenceViewProps) {
   const [activeTab, setActiveTab] = useState<"accounts" | "developer" | "web" | "breaches" | "identity" | "sources">("accounts");
 
-  const raw = report.raw_data as any;
+  const raw = report.raw_data as EmailRaw | undefined;
   const analysis = raw?.analysis || raw || {};
   const validation = analysis.validation || {};
   const confidence = analysis.confidence || {};
-  const accounts: any[] = analysis.accounts || analysis.account_discovery || [];
+  const accounts: Account[] = analysis.accounts || analysis.account_discovery || [];
   const footprint = analysis.footprint || analysis.developer_footprint || {};
-  const webMentions: any[] = analysis.web_mentions || [];
-  const breaches: any[] = analysis.breaches || [];
+  const webMentions: WebMention[] = analysis.web_mentions || [];
+  const breaches: Breach[] = analysis.breaches || [];
   const breachStatus = analysis.breach_status || "unavailable";
-  const usernameCandidates: any[] = analysis.username_candidates || [];
+  const usernameCandidates: UsernameCandidate[] = analysis.username_candidates || [];
   const identitySignals = analysis.identity_signals || {};
-  const sources: any[] = report.sources || analysis.sources || [];
+  const sources: ResearchSource[] = report.sources || analysis.sources || [];
 
   const score = confidence.score ?? 0;
   const confidenceLevel = confidence.level || "NO_EVIDENCE";
 
-  const getStatusBadge = (status: string) => {
+  const getStatusBadge = (status?: string) => {
     switch (status?.toUpperCase()) {
       case "VERIFIED":
         return <Badge className="bg-emerald-500/10 text-emerald-400 border-emerald-500/30 text-xs gap-1"><CheckCircle2 className="w-3 h-3" /> VERIFIED</Badge>;
@@ -209,20 +229,21 @@ export default function EmailIntelligenceView({ report }: EmailIntelligenceViewP
                     <div className="flex items-center gap-3">
                       {acc.avatar_url ? (
                         // eslint-disable-next-line @next/next/no-img-element
-                        <img src={acc.avatar_url} alt="" className="w-10 h-10 rounded-full border border-neutral-700 object-cover" />
+                        <img src={safeExternalUrl(acc.avatar_url)} alt="" className="w-10 h-10 rounded-full border border-neutral-700 object-cover" />
                       ) : (
                         <div className="w-10 h-10 rounded-full bg-neutral-800 border border-neutral-700 flex items-center justify-center font-bold text-sm text-neutral-300">
-                          {acc.platform[0].toUpperCase()}
+                          {(acc.platform || "?")[0]?.toUpperCase() ?? "?"}
                         </div>
                       )}
                       <div>
-                        <div className="font-bold text-white text-sm capitalize">{acc.platform}</div>
+                        <div className="font-bold text-white text-sm capitalize">{acc.platform || "Platform"}</div>
                         <div className="text-xs text-neutral-400 font-mono">{acc.account_identifier || "—"}</div>
                       </div>
                     </div>
 
-                    <div>{getStatusBadge(acc.status)}</div>
+                    <div>{getStatusBadge(acc.status || "")}</div>
                   </div>
+
 
                   {acc.bio && (
                     <p className="text-xs text-neutral-300 italic bg-neutral-900/60 p-2.5 rounded border border-neutral-800 mb-3">
@@ -233,7 +254,7 @@ export default function EmailIntelligenceView({ report }: EmailIntelligenceViewP
                   {acc.evidence && acc.evidence.length > 0 && (
                     <div className="space-y-1 mb-3">
                       <span className="text-[10px] uppercase font-mono text-neutral-500 font-bold">Evidence:</span>
-                      {acc.evidence.map((ev: any, evIdx: number) => (
+                      {acc.evidence.map((ev: Evidence, evIdx: number) => (
                         <p key={evIdx} className="text-xs text-neutral-400 bg-neutral-950 p-2 rounded border border-neutral-800/80">
                           {ev.snippet || ev.title}
                         </p>
@@ -249,7 +270,7 @@ export default function EmailIntelligenceView({ report }: EmailIntelligenceViewP
 
                   {acc.profile_url && (
                     <a
-                      href={acc.profile_url}
+                      href={safeExternalUrl(acc.profile_url)}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-indigo-400 hover:text-indigo-300 flex items-center gap-1 font-medium text-xs"
@@ -304,10 +325,10 @@ export default function EmailIntelligenceView({ report }: EmailIntelligenceViewP
                   Public Repositories ({footprint.repositories.length}):
                 </span>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {footprint.repositories.map((repo: any, i: number) => (
+                  {footprint.repositories.map((repo: Repository, i: number) => (
                     <a
                       key={i}
-                      href={repo.url}
+                      href={safeExternalUrl(repo.url)}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="p-3 rounded-lg bg-neutral-900/40 border border-neutral-800 hover:border-neutral-700 transition-all block"
@@ -316,7 +337,7 @@ export default function EmailIntelligenceView({ report }: EmailIntelligenceViewP
                         <span className="font-semibold text-white text-xs truncate">{repo.name}</span>
                         <div className="flex items-center gap-2 text-[11px] text-neutral-400">
                           {repo.language && <span className="text-indigo-400 font-mono">{repo.language}</span>}
-                          {repo.stars > 0 && <span className="flex items-center gap-0.5"><Star className="w-3 h-3 text-amber-400 fill-amber-400" /> {repo.stars}</span>}
+                          {(repo.stars ?? 0) > 0 && <span className="flex items-center gap-0.5"><Star className="w-3 h-3 text-amber-400 fill-amber-400" /> {repo.stars}</span>}
                         </div>
                       </div>
                       {repo.description && (
@@ -335,7 +356,7 @@ export default function EmailIntelligenceView({ report }: EmailIntelligenceViewP
                   npm Packages:
                 </span>
                 <div className="space-y-2">
-                  {footprint.npm_packages.map((pkg: any, i: number) => (
+                  {footprint.npm_packages.map((pkg: NpmPackage, i: number) => (
                     <div key={i} className="p-2.5 rounded bg-neutral-900 border border-neutral-800 flex items-center justify-between text-xs">
                       <div>
                         <span className="font-bold text-white font-mono">{pkg.name}</span>
@@ -363,11 +384,11 @@ export default function EmailIntelligenceView({ report }: EmailIntelligenceViewP
             <p className="text-xs text-neutral-500 p-6 text-center">No exact web occurrences discovered.</p>
           ) : (
             <div className="space-y-3">
-              {webMentions.map((m: any, idx: number) => (
+              {webMentions.map((m: WebMention, idx: number) => (
                 <div key={idx} className="p-3.5 rounded-lg bg-neutral-900/50 border border-neutral-800 hover:border-neutral-700 transition-all">
                   <div className="flex items-center justify-between gap-2">
                     <a
-                      href={m.url}
+                      href={safeExternalUrl(m.url)}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="font-semibold text-xs text-indigo-400 hover:underline flex items-center gap-1.5"
@@ -413,7 +434,7 @@ export default function EmailIntelligenceView({ report }: EmailIntelligenceViewP
             </div>
           ) : (
             <div className="space-y-3">
-              {breaches.map((b: any, idx: number) => (
+              {breaches.map((b: Breach, idx: number) => (
                 <div key={idx} className="p-4 rounded-lg bg-neutral-900/60 border border-neutral-800">
                   <div className="flex items-center justify-between">
                     <span className="font-bold text-white text-sm">{b.breach_name}</span>
@@ -484,7 +505,7 @@ export default function EmailIntelligenceView({ report }: EmailIntelligenceViewP
               Candidate hypotheses derived from email local-parts. Unconfirmed unless backed by independent proof.
             </p>
             <div className="flex flex-wrap gap-2 pt-2">
-              {usernameCandidates.map((cand: any, idx: number) => (
+              {usernameCandidates.map((cand: UsernameCandidate, idx: number) => (
                 <Badge key={idx} variant="outline" className="bg-neutral-900 border-neutral-800 text-neutral-300 font-mono text-xs px-2.5 py-1">
                   {cand.username} <span className="text-[9px] text-neutral-500 ml-1">({cand.generation_rule?.replace(/_/g, " ")})</span>
                 </Badge>
@@ -505,7 +526,7 @@ export default function EmailIntelligenceView({ report }: EmailIntelligenceViewP
             <p className="text-xs text-neutral-500 p-6 text-center">No external sources cited.</p>
           ) : (
             <div className="divide-y divide-neutral-800/80">
-              {sources.map((src: any, idx: number) => (
+              {sources.map((src: ResearchSource, idx: number) => (
                 <div key={idx} className="py-3 flex items-center justify-between gap-4">
                   <div className="flex items-center gap-3">
                     <span className="w-7 h-7 rounded bg-indigo-950/60 border border-indigo-500/30 flex items-center justify-center font-mono text-xs font-bold text-indigo-300">
@@ -518,7 +539,7 @@ export default function EmailIntelligenceView({ report }: EmailIntelligenceViewP
                   </div>
 
                   <a
-                    href={src.url}
+                    href={safeExternalUrl(src.url)}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-xs text-indigo-400 hover:text-indigo-300 flex items-center gap-1 font-mono flex-shrink-0"
@@ -529,8 +550,4 @@ export default function EmailIntelligenceView({ report }: EmailIntelligenceViewP
               ))}
             </div>
           )}
-        </Card>
-      )}
-    </div>
-  );
-}
+        </Card

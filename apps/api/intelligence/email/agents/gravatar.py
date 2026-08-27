@@ -6,7 +6,7 @@ Wraps Gravatar lookup and provides structured avatar/profile signals.
 
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import List
 from ..models import AccountFinding
 from ..providers.gravatar import GravatarProvider
 

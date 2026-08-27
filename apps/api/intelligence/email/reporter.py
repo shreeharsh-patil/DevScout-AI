@@ -96,7 +96,7 @@ class EmailIntelligenceReporter:
             if footprint.npm_maintainer:
                 lines.append(f"- **npm Maintainer**: [{footprint.npm_maintainer}](https://www.npmjs.com/~{footprint.npm_maintainer})")
             if footprint.top_languages:
-                lines.append(f"- **Primary Languages**: {', '.join(f'`{l}`' for l in footprint.top_languages)}")
+                lines.append(f"- **Primary Languages**: {', '.join(f'`{language}`' for language in footprint.top_languages)}")
             if footprint.organizations:
                 lines.append(f"- **Public Organizations / Affiliations**: {', '.join(footprint.organizations)}")
 

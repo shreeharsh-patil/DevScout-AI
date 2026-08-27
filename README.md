@@ -46,13 +46,14 @@ The API currently recognizes:
 
 | Method | Endpoint | Purpose |
 |---|---|---|
-| GET | `/api/v1/health` | API health check |
+| GET | `/api/v1/health` | Process liveness check |
+| GET | `/api/v1/ready` | Database/required-queue readiness check |
 | POST | `/api/v1/research` | Start a background research job |
 | GET | `/api/v1/research/status/{job_id}` | Read job state and report output |
 | GET | `/api/v1/history` | Return recent research jobs |
 | GET | `/api/v1/research/report/{job_id}` | Retrieve a stored report |
 
-An optional `API_SECRET_KEY` environment value enables `X-API-Key` protection for research creation.
+An optional `API_SECRET_KEY` environment value adds `X-API-Key` protection to research creation. All workspace and report endpoints require a valid bearer token in production.
 
 ## 🚀 Local Development
 
@@ -75,7 +76,42 @@ cd apps/api
 uvicorn main:app --reload
 ```
 
-The API CORS configuration currently permits the local frontend at `http://localhost:3000`.
+The API CORS configuration permits only the origins listed in `CORS_ORIGINS`.
+
+## Production configuration
+
+Use PostgreSQL and Redis/RQ as separate API and worker services. Start the API with `uvicorn main:app --host 0.0.0.0 --port 8000` and the worker with `python worker.py`. Apply Alembic migrations during deployment rather than relying on local SQLite compatibility migration behavior.
+
+Required production settings:
+
+- `APP_ENV=production`
+- `DATABASE_URL=postgresql://...`
+- `REDIS_URL=rediss://...` (or a private Redis network URL)
+- `CORS_ORIGINS=https://your-frontend.example`
+- `JWT_SECRET` with at least 32 random characters
+- `ENABLE_DEMO_AUTH=false`, `ENABLE_DEV_TOKEN_AUTH=false`, `TRUST_IDENTITY_HEADERS=false`
+- `REQUIRE_QUEUE=true`, `ALLOW_LOCAL_QUEUE_FALLBACK=false`, `LOG_JSON=true`
+- `NEXT_PUBLIC_API_URL=https://your-api.example` in the frontend build
+
+Production startup fails closed if authentication or CORS configuration is unsafe. `/api/v1/ready` returns HTTP 503 when the database or a required queue is unavailable.
+
+## Verification
+
+```bash
+cd apps/api
+pytest -q
+ruff check .
+
+cd ../web
+npm run lint
+npx tsc --noEmit
+npm run build
+npm audit
+
+cd ../../packages/agent-reach
+pytest -q
+ruff check .
+```
 
 ## 📁 Repository Architecture
 

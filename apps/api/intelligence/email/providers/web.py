@@ -7,25 +7,20 @@ deduplicates results, and classifies correlation type (exact email mention vs na
 
 from __future__ import annotations
 
-import datetime
 import re
-from typing import List, Tuple
+from typing import List
 from urllib.parse import urlparse
 from loguru import logger
 import requests
-from ..models import CorrelationType, WebMentionFinding
+from ..models import CorrelationType, FindingStatus, WebMention, utc_now_iso
 from .base import BaseProvider
-
-
-def _utc_now_iso() -> str:
-    return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
 class WebSearchProvider(BaseProvider):
     platform_name: str = "web"
 
-    def search_mentions(self, email: str, local_part: str) -> List[WebMentionFinding]:
-        findings: List[WebMentionFinding] = []
+    def search_mentions(self, email: str, local_part: str) -> List[WebMention]:
+        findings: List[WebMention] = []
         seen_urls: set[str] = set()
 
         try:
@@ -38,17 +33,15 @@ class WebSearchProvider(BaseProvider):
         except Exception as e:
             logger.debug(f"[WebSearchProvider] Error during search: {e}")
 
-        return findings[:10]  # Cap at top 10 deduplicated mentions
+        return findings[:10]
 
     def _parse_jina_output(
         self, text: str, email: str, local_part: str, seen_urls: set[str]
-    ) -> List[WebMentionFinding]:
-        results: List[WebMentionFinding] = []
+    ) -> List[WebMention]:
+        results: List[WebMention] = []
         if not text:
             return results
 
-        # Jina returns markdown with [Title](URL) or Title: ... URL: ...
-        # Match URL citations
         blocks = text.split("\n\n")
         idx = 1
         for block in blocks:
@@ -63,32 +56,44 @@ class WebSearchProvider(BaseProvider):
 
             seen_urls.add(clean_url)
 
-            # Determine title & snippet
-            lines = [l.strip() for l in block.split("\n") if l.strip()]
+            lines = [line.strip() for line in block.split("\n") if line.strip()]
             title = lines[0].replace("[", "").replace("]", "") if lines else f"Web Mention {idx}"
             snippet = " ".join(lines[1:3]) if len(lines) > 1 else block[:200]
 
-            # Classify correlation type
             if email.lower() in block.lower():
                 corr_type = CorrelationType.EXACT_EMAIL_MENTION
+                status = FindingStatus.HIGH_CONFIDENCE
+                score = 0.85
             elif local_part.lower() in block.lower():
                 corr_type = CorrelationType.USERNAME_CORRELATION
+                status = FindingStatus.CANDIDATE
+                score = 0.35
             else:
                 corr_type = CorrelationType.NAME_CORRELATION
+                status = FindingStatus.PROBABLE
+                score = 0.50
 
             try:
                 domain = urlparse(clean_url).netloc
             except Exception:
                 domain = "web"
 
-            finding = WebMentionFinding(
-                source_id=f"web_mention_{idx}",
+            src_id = f"web_mention_{idx}"
+            finding = WebMention(
+                provider="web",
+                finding_type="web_mention",
+                status=status,
+                confidence_level=status,
+                confidence_score=score,
+                evidence_ids=[src_id],
+                retrieved_at=utc_now_iso(),
+                source_id=src_id,
                 url=clean_url,
                 title=title[:120],
                 domain=domain,
                 snippet=snippet[:250],
                 correlation_type=corr_type,
-                retrieved_at=_utc_now_iso()
+                metadata={"domain": domain}
             )
             results.append(finding)
             idx += 1
@@ -96,5 +101,4 @@ class WebSearchProvider(BaseProvider):
         return results
 
     def search(self, email: str, local_part: str, domain: str):
-        # Implements BaseProvider search contract
         return []

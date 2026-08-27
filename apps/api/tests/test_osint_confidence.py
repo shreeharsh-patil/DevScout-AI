@@ -146,6 +146,7 @@ class TestOSINTConfidenceModel:
 
     def test_analyzer_separates_confirmed_and_candidate(self):
         analyzer = AnalyzerAgent()
+        analyzer.use_llm = False
         
         # Test analyzer output structure
         email_data = {

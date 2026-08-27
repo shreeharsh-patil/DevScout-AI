@@ -7,8 +7,8 @@ and technical activity into a comprehensive developer footprint report.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
-from ..models import AccountFinding, ConfidenceLevel, DeveloperFootprint
+from typing import List
+from ..models import AccountFinding, DeveloperFootprint
 from ..providers.npm import NpmProvider
 from .github_identity import GitHubIdentityAgent
 

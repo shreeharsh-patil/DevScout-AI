@@ -7,7 +7,7 @@ language distribution, followers, organizations, and contribution patterns.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Dict, List
 from ..models import AccountFinding, ConfidenceLevel, DeveloperFootprint, DeveloperRepository
 from ..providers.github import GitHubProvider
 

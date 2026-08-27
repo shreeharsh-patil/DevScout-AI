@@ -7,17 +7,12 @@ public profile emails, and strict candidate handle checks.
 
 from __future__ import annotations
 
-import datetime
 import os
 from typing import Any, Dict, List
 from loguru import logger
 import requests
-from ..models import AccountFinding, ConfidenceLevel, EvidenceItem
+from ..models import AccountFinding, FindingStatus, Evidence, utc_now_iso
 from .base import BaseProvider
-
-
-def _utc_now_iso() -> str:
-    return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
 class GitHubProvider(BaseProvider):
@@ -56,16 +51,16 @@ class GitHubProvider(BaseProvider):
                         login = actor.get("login")
                         if login and login not in found_logins:
                             found_logins.add(login)
-                            # Fetch user full profile
                             profile_data = self._fetch_user_profile(login)
 
-                            evidence_item = EvidenceItem(
-                                source_id=f"gh_commit_{commit_sha}",
-                                platform="github",
+                            ev_id = f"gh_commit_{commit_sha}"
+                            evidence_item = Evidence(
+                                evidence_id=ev_id,
+                                provider="github",
                                 source_type="public_commit",
                                 title=f"GitHub Commit Author in {repo_name}",
                                 url=commit_url or f"https://github.com/{login}",
-                                retrieved_at=_utc_now_iso(),
+                                retrieved_at=utc_now_iso(),
                                 supports="github_identity",
                                 strength="deterministic",
                                 snippet=f"Public commit {commit_sha} in {repo_name} lists '{email}' as author/committer.",
@@ -73,9 +68,13 @@ class GitHubProvider(BaseProvider):
                             )
 
                             finding = AccountFinding(
+                                provider="github",
+                                finding_type="account",
                                 platform="github",
-                                status=ConfidenceLevel.VERIFIED,
-                                confidence=1.0,
+                                status=FindingStatus.VERIFIED,
+                                confidence_level=FindingStatus.VERIFIED,
+                                confidence_score=1.0,
+                                evidence_ids=[ev_id],
                                 account_identifier=login,
                                 profile_url=f"https://github.com/{login}",
                                 display_name=profile_data.get("name") or login,
@@ -107,13 +106,14 @@ class GitHubProvider(BaseProvider):
                         found_logins.add(login)
                         profile_data = self._fetch_user_profile(login)
 
-                        evidence_item = EvidenceItem(
-                            source_id=f"gh_profile_{login}",
-                            platform="github",
+                        ev_id = f"gh_profile_{login}"
+                        evidence_item = Evidence(
+                            evidence_id=ev_id,
+                            provider="github",
                             source_type="profile_email",
                             title=f"GitHub Profile Email: {login}",
                             url=f"https://github.com/{login}",
-                            retrieved_at=_utc_now_iso(),
+                            retrieved_at=utc_now_iso(),
                             supports="github_identity",
                             strength="deterministic",
                             snippet=f"User profile '{login}' publicly displays email address '{email}'.",
@@ -121,9 +121,13 @@ class GitHubProvider(BaseProvider):
                         )
 
                         finding = AccountFinding(
+                            provider="github",
+                            finding_type="account",
                             platform="github",
-                            status=ConfidenceLevel.VERIFIED,
-                            confidence=1.0,
+                            status=FindingStatus.VERIFIED,
+                            confidence_level=FindingStatus.VERIFIED,
+                            confidence_score=1.0,
+                            evidence_ids=[ev_id],
                             account_identifier=login,
                             profile_url=f"https://github.com/{login}",
                             display_name=profile_data.get("name") or login,
@@ -144,10 +148,8 @@ class GitHubProvider(BaseProvider):
             logger.debug(f"[GitHubProvider] Profile search error: {e}")
 
         # ── Strategy 3: Handle Prefix Guess (STRICTLY CANDIDATE / PROBABLE) ──
-        # If no verified accounts found yet, check whether a user exists with the exact handle prefix
         if local_part and local_part.lower() not in [login.lower() for login in found_logins]:
             candidate_handle = local_part.strip()
-            # Clean non-alphanumeric chars for valid GitHub handles
             clean_handle = candidate_handle.replace(".", "").replace("+", "")
             for handle in [candidate_handle, clean_handle]:
                 if not handle or len(handle) < 2 or handle in found_logins:
@@ -163,38 +165,43 @@ class GitHubProvider(BaseProvider):
                     blog = (profile.get("blog") or "").lower()
 
                     if pub_email == email.lower():
-                        status = ConfidenceLevel.VERIFIED
+                        status = FindingStatus.VERIFIED
                         conf = 1.0
                         method = "public_profile_email"
                         snippet = f"GitHub user '{login}' matches email prefix and has exact matching public profile email '{email}'."
                     elif domain and (domain in bio or domain in company or domain in blog):
-                        status = ConfidenceLevel.PROBABLE
+                        status = FindingStatus.PROBABLE
                         conf = 0.70
                         method = "inferred_handle_domain_correlation"
                         snippet = f"GitHub handle '{login}' matches email prefix, and user bio/website references '{domain}'."
                     else:
-                        status = ConfidenceLevel.CANDIDATE
+                        status = FindingStatus.CANDIDATE
                         conf = 0.25
                         method = "unverified_handle_prefix_guess"
                         snippet = f"GitHub handle '{login}' matches email prefix '{handle}', but no cryptographic or email link was verified. Treat as an unconfirmed candidate lead only."
 
-                    evidence_item = EvidenceItem(
-                        source_id=f"gh_candidate_{login}",
-                        platform="github",
+                    ev_id = f"gh_candidate_{login}"
+                    evidence_item = Evidence(
+                        evidence_id=ev_id,
+                        provider="github",
                         source_type="candidate_handle",
                         title=f"GitHub Profile: {login} ({status.value})",
                         url=f"https://github.com/{login}",
-                        retrieved_at=_utc_now_iso(),
+                        retrieved_at=utc_now_iso(),
                         supports="github_identity",
-                        strength="moderate" if status == ConfidenceLevel.PROBABLE else "weak",
+                        strength="moderate" if status == FindingStatus.PROBABLE else "weak",
                         snippet=snippet,
                         raw_data={"login": login, "public_email": pub_email}
                     )
 
                     finding = AccountFinding(
+                        provider="github",
+                        finding_type="account",
                         platform="github",
                         status=status,
-                        confidence=conf,
+                        confidence_level=status,
+                        confidence_score=conf,
+                        evidence_ids=[ev_id],
                         account_identifier=login,
                         profile_url=f"https://github.com/{login}",
                         display_name=profile.get("name") or login,
@@ -216,7 +223,6 @@ class GitHubProvider(BaseProvider):
         return findings
 
     def _fetch_user_profile(self, username: str) -> Dict[str, Any]:
-        """Fetches public user metadata for a GitHub handle."""
         try:
             url = f"https://api.github.com/users/{username}"
             resp = self._safe_request(url, headers=self.headers, timeout=10)
@@ -227,7 +233,6 @@ class GitHubProvider(BaseProvider):
         return {}
 
     def fetch_user_repositories(self, username: str, limit: int = 6) -> List[Dict[str, Any]]:
-        """Fetches recent public repositories for a verified/candidate GitHub user."""
         try:
             url = f"https://api.github.com/users/{username}/repos?sort=pushed&per_page={limit}"
             resp = self._safe_request(url, headers=self.headers, timeout=10)

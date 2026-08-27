@@ -7,18 +7,15 @@ from dotenv import load_dotenv
 
 # Try to load google-generativeai for LLM analysis
 try:
-    import google.generativeai as genai
-    import google.api_core.exceptions
+    from google import genai
+    from google.genai import errors as genai_errors
     HAS_GENAI = True
 except ImportError:
     HAS_GENAI = False
 
 load_dotenv()
 
-# Configure Gemini if available
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-if HAS_GENAI and GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
 
 # Tech-stack keyword detection list (used in analyze_startup)
 TECH_KEYWORDS = [
@@ -47,9 +44,12 @@ class AnalyzerAgent:
     def __init__(self):
         self.use_llm = HAS_GENAI and bool(GEMINI_API_KEY)
         if self.use_llm:
-            self.model = genai.GenerativeModel('gemini-2.0-flash')
+            self.client = genai.Client(
+                api_key=GEMINI_API_KEY,
+                http_options={"timeout": int(float(os.getenv("LLM_TIMEOUT_SECONDS", "45")) * 1000)},
+            )
         else:
-            self.model = None
+            self.client = None
 
     def _safe_generate(self, prompt: str) -> str:
         """
@@ -57,14 +57,16 @@ class AnalyzerAgent:
         Raises RuntimeError('RATE_LIMITED') on ResourceExhausted.
         """
         try:
-            response = self.model.generate_content(
-                prompt,
-                request_options={"timeout": float(os.getenv("LLM_TIMEOUT_SECONDS", "45"))},
+            response = self.client.models.generate_content(
+                model=os.getenv("GEMINI_MODEL", "gemini-2.0-flash"),
+                contents=prompt,
             )
             return response.text
-        except google.api_core.exceptions.ResourceExhausted:
-            logger.warning("Gemini rate limit hit (ResourceExhausted).")
-            raise RuntimeError("RATE_LIMITED")
+        except genai_errors.ClientError as exc:
+            if getattr(exc, "code", None) == 429:
+                logger.warning("Gemini rate limit hit.")
+                raise RuntimeError("RATE_LIMITED") from exc
+            raise
         except Exception:
             raise
 

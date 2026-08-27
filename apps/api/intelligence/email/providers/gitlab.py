@@ -6,16 +6,11 @@ Discovers public GitLab developer accounts using the public GitLab REST API.
 
 from __future__ import annotations
 
-import datetime
 from typing import List
 from loguru import logger
 import requests
-from ..models import AccountFinding, ConfidenceLevel, EvidenceItem
+from ..models import AccountFinding, FindingStatus, Evidence, utc_now_iso
 from .base import BaseProvider
-
-
-def _utc_now_iso() -> str:
-    return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
 class GitLabProvider(BaseProvider):
@@ -35,29 +30,34 @@ class GitLabProvider(BaseProvider):
                         login = u.get("username")
                         pub_email = (u.get("public_email") or "").strip().lower()
                         status = (
-                            ConfidenceLevel.VERIFIED
+                            FindingStatus.VERIFIED
                             if pub_email == email.lower()
-                            else ConfidenceLevel.CANDIDATE
+                            else FindingStatus.CANDIDATE
                         )
-                        conf = 1.0 if status == ConfidenceLevel.VERIFIED else 0.25
+                        conf = 1.0 if status == FindingStatus.VERIFIED else 0.25
 
-                        evidence = EvidenceItem(
-                            source_id=f"gitlab_{login}",
-                            platform="gitlab",
+                        ev_id = f"gitlab_{login}"
+                        evidence = Evidence(
+                            evidence_id=ev_id,
+                            provider="gitlab",
                             source_type="public_profile",
                             title=f"GitLab Profile: {login}",
                             url=u.get("web_url") or f"https://gitlab.com/{login}",
-                            retrieved_at=_utc_now_iso(),
+                            retrieved_at=utc_now_iso(),
                             supports="gitlab_identity",
-                            strength="deterministic" if status == ConfidenceLevel.VERIFIED else "weak",
+                            strength="deterministic" if status == FindingStatus.VERIFIED else "weak",
                             snippet=f"GitLab user '{login}' ({status.value}). Public email: {pub_email or 'Hidden'}.",
                             raw_data=u
                         )
 
                         finding = AccountFinding(
+                            provider="gitlab",
+                            finding_type="account",
                             platform="gitlab",
                             status=status,
-                            confidence=conf,
+                            confidence_level=status,
+                            confidence_score=conf,
+                            evidence_ids=[ev_id],
                             account_identifier=login,
                             profile_url=u.get("web_url") or f"https://gitlab.com/{login}",
                             display_name=u.get("name") or login,

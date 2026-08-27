@@ -7,15 +7,10 @@ Provides verified avatar images, display names, and public bios.
 
 from __future__ import annotations
 
-import datetime
 import hashlib
 from typing import List
-from ..models import AccountFinding, ConfidenceLevel, EvidenceItem
+from ..models import AccountFinding, FindingStatus, Evidence, utc_now_iso
 from .base import BaseProvider
-
-
-def _utc_now_iso() -> str:
-    return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
 class GravatarProvider(BaseProvider):
@@ -55,13 +50,14 @@ class GravatarProvider(BaseProvider):
                 avatar_url = f"https://www.gravatar.com/avatar/{md5_hash}?s=200"
 
         if has_profile:
-            evidence = EvidenceItem(
-                source_id=f"gravatar_{md5_hash[:8]}",
-                platform="gravatar",
+            ev_id = f"gravatar_{md5_hash[:8]}"
+            evidence = Evidence(
+                evidence_id=ev_id,
+                provider="gravatar",
                 source_type="cryptographic_hash_lookup",
                 title=f"Gravatar Profile ({display_name or 'Matched Avatar'})",
                 url=profile_web_url,
-                retrieved_at=_utc_now_iso(),
+                retrieved_at=utc_now_iso(),
                 supports="gravatar_identity",
                 strength="deterministic",
                 snippet=f"Verified Gravatar record matching MD5({normalized_email})={md5_hash}. Display: '{display_name or 'N/A'}'.",
@@ -69,9 +65,13 @@ class GravatarProvider(BaseProvider):
             )
 
             finding = AccountFinding(
+                provider="gravatar",
+                finding_type="account",
                 platform="gravatar",
-                status=ConfidenceLevel.VERIFIED,
-                confidence=1.0,
+                status=FindingStatus.VERIFIED,
+                confidence_level=FindingStatus.VERIFIED,
+                confidence_score=1.0,
+                evidence_ids=[ev_id],
                 account_identifier=md5_hash,
                 profile_url=profile_web_url,
                 display_name=display_name,
@@ -87,11 +87,14 @@ class GravatarProvider(BaseProvider):
             )
             findings.append(finding)
         else:
-            # Report checked with no public profile
             finding = AccountFinding(
+                provider="gravatar",
+                finding_type="account",
                 platform="gravatar",
-                status=ConfidenceLevel.NO_EVIDENCE,
-                confidence=0.0,
+                status=FindingStatus.NO_EVIDENCE,
+                confidence_level=FindingStatus.NO_EVIDENCE,
+                confidence_score=0.0,
+                evidence_ids=[],
                 method="cryptographic_email_hash_lookup",
                 evidence=[],
                 metadata={"md5_hash": md5_hash, "has_profile": False}

@@ -7,7 +7,7 @@ Discovers public web occurrences of the target email and filters them by correla
 from __future__ import annotations
 
 from typing import List
-from ..models import CorrelationType, WebMentionFinding
+from ..models import WebMentionFinding
 from ..providers.web import WebSearchProvider
 
 

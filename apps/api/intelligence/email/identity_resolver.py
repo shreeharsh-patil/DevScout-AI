@@ -8,7 +8,14 @@ while strictly isolating candidate guesses and annotating identity ambiguity.
 from __future__ import annotations
 
 from typing import List
-from .models import AccountFinding, ConfidenceLevel, DeveloperFootprint, IdentitySignals, UsernameCandidate
+from .models import (
+    AccountFinding,
+    DeveloperFootprint,
+    FindingStatus,
+    IdentityFinding,
+    UsernameCandidate,
+    utc_now_iso,
+)
 
 
 class IdentityResolverAgent:
@@ -21,7 +28,7 @@ class IdentityResolverAgent:
         account_findings: List[AccountFinding],
         footprint: DeveloperFootprint,
         username_candidates: List[UsernameCandidate]
-    ) -> IdentitySignals:
+    ) -> IdentityFinding:
         possible_names: List[str] = []
         possible_usernames: List[str] = []
         developer_profiles: List[dict] = []
@@ -30,11 +37,14 @@ class IdentityResolverAgent:
         locations: List[str] = []
         public_bios: List[str] = []
         avatars: List[str] = []
+        evidence_ids: List[str] = []
 
-        verified_findings = [a for a in account_findings if a.status == ConfidenceLevel.VERIFIED]
+        verified_findings = [a for a in account_findings if a.status == FindingStatus.VERIFIED]
         target_findings = verified_findings if verified_findings else account_findings
 
         for finding in target_findings:
+            evidence_ids.extend(finding.evidence_ids)
+
             if finding.display_name and finding.display_name not in possible_names:
                 possible_names.append(finding.display_name)
 
@@ -54,7 +64,6 @@ class IdentityResolverAgent:
             if finding.bio and finding.bio not in public_bios:
                 public_bios.append(finding.bio)
 
-            # Metadata properties
             meta = finding.metadata
             blog = meta.get("blog")
             if blog and blog not in websites:
@@ -68,12 +77,10 @@ class IdentityResolverAgent:
             if loc and loc not in locations:
                 locations.append(loc)
 
-        # Include candidate usernames in possible_usernames list
         for cand in username_candidates:
             if cand.username not in possible_usernames:
                 possible_usernames.append(cand.username)
 
-        # Infer name from local part if no explicit display name was found
         resolved_name = possible_names[0] if possible_names else None
         if not resolved_name and "." in local_part:
             parts = local_part.split(".")
@@ -82,9 +89,22 @@ class IdentityResolverAgent:
 
         ambiguity_note = None
         if len(possible_names) > 2:
-            ambiguity_note = f"Multiple distinct names ({', '.join(possible_names[:3])}) were returned across candidate accounts. Treat identity correlation with caution."
+            ambiguity_note = (
+                f"Multiple distinct names ({', '.join(possible_names[:3])}) were returned across candidate accounts. "
+                "Treat identity correlation with caution."
+            )
 
-        return IdentitySignals(
+        status = FindingStatus.VERIFIED if verified_findings else FindingStatus.PROBABLE if possible_names else FindingStatus.CANDIDATE
+        score = 1.0 if verified_findings else 0.60 if possible_names else 0.25
+
+        return IdentityFinding(
+            provider="identity_resolver",
+            finding_type="identity",
+            status=status,
+            confidence_level=status,
+            confidence_score=score,
+            evidence_ids=list(dict.fromkeys(evidence_ids)),
+            retrieved_at=utc_now_iso(),
             possible_name=resolved_name,
             possible_usernames=possible_usernames[:8],
             developer_profiles=developer_profiles,

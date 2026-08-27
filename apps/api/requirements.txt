@@ -18,7 +18,7 @@ loguru>=0.7.2,<1.0.0
 python-dotenv>=1.0.0,<2.0.0
 
 # AI / LLM Analysis
-google-generativeai>=0.8.0,<1.0.0
+google-genai>=1.0.0,<2.0.0
 
 # Background Task Queue & Worker
 redis>=5.0.0,<6.0.0
@@ -26,4 +26,3 @@ rq>=1.16.0,<3.0.0
 
 # Media Tools (provides CLI binary for YouTube extraction)
 yt-dlp>=2024.0.0
-

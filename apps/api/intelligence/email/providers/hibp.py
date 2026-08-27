@@ -12,7 +12,7 @@ import os
 from typing import List, Tuple
 from loguru import logger
 import requests
-from ..models import BreachFinding
+from ..models import BreachFinding, FindingStatus, utc_now_iso
 from .base import BaseProvider
 
 
@@ -29,7 +29,6 @@ class HIBPProvider(BaseProvider):
         status_string: 'checked', 'unavailable', or 'error'
         """
         if not self.api_key:
-            # When HIBP API key is unconfigured, return UNAVAILABLE cleanly
             return [], "unavailable"
 
         findings: List[BreachFinding] = []
@@ -45,18 +44,27 @@ class HIBPProvider(BaseProvider):
 
             if resp.status_code == 200:
                 for b in resp.json():
+                    b_name = b.get("Title") or b.get("Name", "Security Breach")
+                    ev_id = f"hibp_{b.get('Name', 'breach').lower()}"
                     findings.append(BreachFinding(
-                        breach_name=b.get("Title") or b.get("Name", "Security Breach"),
+                        provider="hibp",
+                        finding_type="breach",
+                        status=FindingStatus.VERIFIED,
+                        confidence_level=FindingStatus.VERIFIED,
+                        confidence_score=0.90,
+                        evidence_ids=[ev_id],
+                        retrieved_at=utc_now_iso(),
+                        breach_name=b_name,
                         domain=b.get("Domain", ""),
                         breach_date=b.get("BreachDate"),
                         data_classes=b.get("DataClasses", []),
                         is_verified=b.get("IsVerified", True),
-                        description=b.get("Description", "")[:200]
+                        description=b.get("Description", "")[:200],
+                        metadata={"dataclasses_count": len(b.get("DataClasses", []))}
                     ))
                 return findings, "checked"
 
             elif resp.status_code == 404:
-                # No breach records found for this email address
                 return [], "checked"
 
             elif resp.status_code in (401, 403):

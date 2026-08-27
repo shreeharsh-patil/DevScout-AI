@@ -41,7 +41,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import IdentityProfile from "@/components/identity-profile";
+import EmailIntelligenceView from "@/components/email/email-intelligence-view";
+
 
 // Extracted components
 import Header from "@/components/layout/header";
@@ -565,12 +566,10 @@ export default function OnePageApp() {
                       <SwotGrid markdown={report.report} />
                     )}
 
-                    {activeType === "email" && report?.raw_data ? (
-                      <IdentityProfile
-                        analysis={report.raw_data?.analysis}
-                        researcher={report.raw_data?.researcher}
-                      />
+                    {(activeType === "email" || activeType === "email_intelligence") && report?.raw_data ? (
+                      <EmailIntelligenceView report={report} />
                     ) : (
+
                       <Card className="bg-black border-neutral-800 min-h-[400px] overflow-hidden">
                         {/* Toolbar */}
                         <div className="p-4 border-b border-neutral-800 bg-neutral-900/50 flex items-center justify-between">

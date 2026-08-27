@@ -8,6 +8,7 @@ class TestAnalyzersSafetyAndFallbacks:
 
     def setup_method(self):
         self.analyzer = AnalyzerAgent()
+        self.analyzer.use_llm = False
         self.reporter = ReporterAgent()
 
     def test_developer_analyzer_missing_data(self):

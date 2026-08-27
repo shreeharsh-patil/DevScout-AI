@@ -7,7 +7,7 @@ import sys
 
 import pytest
 
-from agent_reach.probe import ProbeResult, probe_command, reinstall_hint
+from agent_reach.probe import probe_command, reinstall_hint
 
 
 def _make_executable(path, content):
