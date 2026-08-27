@@ -48,6 +48,9 @@ export interface ResearchReport {
   job_id: string;
   status: string;
   stage?: string;
+  custom_title?: string;
+  is_saved?: boolean;
+  tags?: string[];
   research_type?: string;
   report?: string;
   report_markdown?: string;
@@ -59,6 +62,7 @@ export interface ResearchReport {
   error?: string;
   message?: string;
 }
+
 
 export interface HistoryItem {
   job_id: string;

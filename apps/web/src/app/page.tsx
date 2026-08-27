@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect } from "react";
+
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Search,
@@ -19,7 +20,14 @@ import {
   Sparkles,
   ChevronDown,
   Download,
+  Bookmark,
+  Edit2,
+  Trash2,
+  Check,
+  X,
 } from "lucide-react";
+
+
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -54,6 +62,9 @@ import IconForType from "@/components/research/icon-for-type";
 import { detectQueryType } from "@/lib/query-detector";
 import { parseScore, downloadMarkdown } from "@/lib/report-utils";
 import { useResearch } from "@/hooks/useResearch";
+import { useAuth } from "@/context/auth-context";
+import { updateReport, deleteJob } from "@/lib/api";
+
 import { useCyclingPlaceholder } from "@/hooks/use-cycling-placeholder";
 import { ALL_RESEARCH_TYPES } from "@/lib/type-meta";
 import type { ResearchType } from "@/types/research";
@@ -154,6 +165,53 @@ export default function OnePageApp() {
   const { status, report, errorMessage, startResearch, reset } = useResearch();
   const placeholder = useCyclingPlaceholder(query.trim() === "");
 
+  const { refreshAuth } = useAuth();
+  const [isSaved, setIsSaved] = useState(false);
+  const [customTitle, setCustomTitle] = useState("");
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+
+  useEffect(() => {
+    if (report) {
+      setIsSaved(Boolean(report.is_saved));
+      setCustomTitle(report.custom_title || "");
+    }
+  }, [report]);
+
+  const handleToggleSaveCurrentReport = async () => {
+    if (!report?.job_id) return;
+    try {
+      const next = !isSaved;
+      await updateReport(report.job_id, { is_saved: next });
+      setIsSaved(next);
+      refreshAuth();
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleRenameCurrentReport = async () => {
+    if (!report?.job_id) return;
+    try {
+      await updateReport(report.job_id, { custom_title: customTitle.trim() });
+      setIsEditingTitle(false);
+      refreshAuth();
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleDeleteCurrentReport = async () => {
+    if (!report?.job_id) return;
+    if (!confirm("Are you sure you want to delete this research job?")) return;
+    try {
+      await deleteJob(report.job_id);
+      reset();
+      refreshAuth();
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   // Live detection as user types
   const detection = query.trim() ? detectQueryType(query) : null;
   const activeType: ResearchType =
@@ -161,7 +219,8 @@ export default function OnePageApp() {
 
   const handleStartResearch = useCallback(() => {
     startResearch(query, activeType);
-  }, [startResearch, query, activeType]);
+    refreshAuth();
+  }, [startResearch, query, activeType, refreshAuth]);
 
   const handleSelectQuery = useCallback((q: string) => {
     setQuery(q);
@@ -174,6 +233,7 @@ export default function OnePageApp() {
     (activeType === "developer" || activeType === "idea" || activeType === "github-repo" || activeType === "repository")
       ? parseScore(report.report)
       : null;
+
 
   return (
     <div className="flex flex-col min-h-screen bg-[#050505] text-white selection:bg-indigo-500/30">
@@ -509,17 +569,66 @@ export default function OnePageApp() {
                             <div className="w-3 h-3 rounded-full bg-yellow-500/50" />
                             <div className="w-3 h-3 rounded-full bg-green-500/50" />
                           </div>
-                          <span className="text-[10px] font-mono text-neutral-600">
-                            RESEARCH_REPORT.MD
-                          </span>
                           <div className="flex items-center gap-2">
+                            {isEditingTitle ? (
+                              <div className="flex items-center gap-1">
+                                <input
+                                  type="text"
+                                  placeholder="Custom report title..."
+                                  value={customTitle}
+                                  onChange={(e) => setCustomTitle(e.target.value)}
+                                  className="bg-black border border-indigo-500 rounded px-2 py-0.5 text-xs text-white focus:outline-none"
+                                  autoFocus
+                                />
+                                <button
+                                  onClick={handleRenameCurrentReport}
+                                  className="p-1 text-indigo-400 hover:text-indigo-300"
+                                >
+                                  <Check className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  onClick={() => setIsEditingTitle(false)}
+                                  className="p-1 text-neutral-500 hover:text-white"
+                                >
+                                  <X className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                onClick={() => setIsEditingTitle(true)}
+                                className="text-xs text-neutral-400 hover:text-white flex items-center gap-1 font-medium truncate max-w-[200px]"
+                                title="Click to rename report"
+                              >
+                                <span>{customTitle || "RESEARCH_REPORT.MD"}</span>
+                                <Edit2 className="w-3 h-3 text-neutral-500" />
+                              </button>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-1.5 sm:gap-2">
                             <Badge
                               variant="outline"
                               className="text-[10px] border-indigo-500/30 text-indigo-400"
                             >
                               {activeType.toUpperCase()}
                             </Badge>
+
+                            {/* Bookmark / Save Report */}
+                            <button
+                              onClick={handleToggleSaveCurrentReport}
+                              className={`flex items-center gap-1 text-[10px] border rounded px-2 py-1 transition-all ${
+                                isSaved
+                                  ? "border-emerald-500/40 bg-emerald-950/40 text-emerald-400"
+                                  : "border-neutral-700 hover:border-neutral-500 text-neutral-400 hover:text-white"
+                              }`}
+                              title={isSaved ? "Saved in workspace" : "Save / Bookmark Report"}
+                            >
+                              <Bookmark className={`w-3 h-3 ${isSaved ? "fill-emerald-400" : ""}`} />
+                              <span className="hidden sm:inline">{isSaved ? "Saved" : "Save"}</span>
+                            </button>
+
                             <CopyButton text={report.report || ""} />
+
                             <button
                               onClick={() => downloadMarkdown(report.report || "", activeType)}
                               className="flex items-center gap-1 text-[10px] text-neutral-500 hover:text-white border border-neutral-700 hover:border-neutral-500 rounded px-2 py-1 transition-all"
@@ -528,8 +637,17 @@ export default function OnePageApp() {
                               <Download className="w-3 h-3" />
                               .md
                             </button>
+
+                            <button
+                              onClick={handleDeleteCurrentReport}
+                              className="flex items-center gap-1 text-[10px] text-neutral-500 hover:text-red-400 border border-neutral-800 hover:border-red-900/50 rounded px-1.5 py-1 transition-all"
+                              title="Delete Report"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </button>
                           </div>
                         </div>
+
                         <CardContent className="p-6 sm:p-8">
                           <MarkdownReport content={report.report || ""} />
                         </CardContent>
