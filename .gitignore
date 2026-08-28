@@ -7,7 +7,12 @@ __pycache__/
 
 # Databases
 *.db
+*.db-wal
+*.db-shm
+*.db-journal
 *.sqlite
+*.sqlite-wal
+*.sqlite-shm
 *.sqlite3
 
 # Virtual Environments

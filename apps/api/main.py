@@ -462,9 +462,11 @@ async def start_research(
         user_id=user.id,
         workspace_id=workspace.id,
         research_type=request.type,
+        depth=request.depth,
         query=query,
         status="pending",
         stage="queued",
+        progress=0,
     )
     try:
         db.add(new_job)
@@ -480,11 +482,11 @@ async def start_research(
         raise HTTPException(status_code=503, detail="Research storage is temporarily unavailable")
 
     # 2. Push into durable queue (or graceful fallback for local development)
-    enqueue_res = enqueue_research_job(job_id, query, request.type)
+    enqueue_res = enqueue_research_job(job_id, query, request.type, depth=request.depth)
     if not enqueue_res.get("queued"):
         if ALLOW_LOCAL_QUEUE_FALLBACK:
             logger.warning("queue_unavailable_using_local_fallback", job_id=job_id)
-            background_tasks.add_task(execute_research_job, job_id, query, request.type)
+            background_tasks.add_task(execute_research_job, job_id, query, request.type, request.depth)
         else:
             new_job.status = "failed"
             new_job.stage = "failed"
@@ -539,6 +541,8 @@ async def get_job_status(
         "workspace_id": job.workspace_id,
         "status": job.status,
         "stage": job.stage,
+        "progress": getattr(job, "progress", 0) or 0,
+        "depth": getattr(job, "depth", "standard") or "standard",
         "custom_title": job.custom_title,
         "is_saved": job.is_saved,
         "tags": tags,
@@ -617,6 +621,8 @@ async def get_history(
             "is_saved": job.is_saved,
             "status": job.status,
             "stage": job.stage,
+            "progress": getattr(job, "progress", 0) or 0,
+            "depth": getattr(job, "depth", "standard") or "standard",
             "created_at": job.created_at.isoformat() if job.created_at else None,
         }
         for job in jobs
@@ -644,6 +650,9 @@ async def get_saved_reports(
             "custom_title": job.custom_title,
             "is_saved": True,
             "status": job.status,
+            "stage": job.stage,
+            "progress": getattr(job, "progress", 0) or 0,
+            "depth": getattr(job, "depth", "standard") or "standard",
             "created_at": job.created_at.isoformat() if job.created_at else None,
             "updated_at": job.updated_at.isoformat() if job.updated_at else None,
         }
@@ -679,6 +688,9 @@ async def get_report(
         "custom_title": job.custom_title,
         "is_saved": job.is_saved,
         "status": job.status,
+        "stage": job.stage,
+        "progress": getattr(job, "progress", 0) or 0,
+        "depth": getattr(job, "depth", "standard") or "standard",
         "report_markdown": job.report_markdown,
         "sources": sources,
         "created_at": job.created_at.isoformat() if job.created_at else None,

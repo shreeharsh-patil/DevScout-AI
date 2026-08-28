@@ -23,7 +23,25 @@ class RateLimitError(Exception):
     pass
 
 
-def execute_research_job(job_id: str, query: str, research_type: str) -> Dict[str, Any]:
+STAGE_PROGRESS_MAP: Dict[str, int] = {
+    "queued": 0,
+    "researching": 15,
+    "validating_email": 12,
+    "checking_developer_sources": 25,
+    "searching_public_web": 42,
+    "processing_account_findings": 61,
+    "correlating_identities": 74,
+    "scoring_evidence": 86,
+    "analyzing": 75,
+    "reporting": 90,
+    "building_report": 94,
+    "completed": 100,
+    "failed": 0,
+    "rate_limited": 0,
+}
+
+
+def execute_research_job(job_id: str, query: str, research_type: str, depth: str = "standard") -> Dict[str, Any]:
     """
     Executes a research job with durable state tracking and duplicate execution prevention.
     
@@ -31,7 +49,7 @@ def execute_research_job(job_id: str, query: str, research_type: str) -> Dict[st
       queued -> researching -> analyzing -> reporting -> completed
       (or failed / rate_limited on error)
     """
-    logger.info(f"[Worker] Picking up job {job_id} ({research_type}: '{query}')")
+    logger.info(f"[Worker] Picking up job {job_id} ({research_type}: '{query}', depth='{depth}')")
     db = SessionLocal()
 
     try:
@@ -58,6 +76,8 @@ def execute_research_job(job_id: str, query: str, research_type: str) -> Dict[st
         # Mark job as processing
         job.status = "processing"
         job.stage = "researching"
+        job.depth = depth or getattr(job, "depth", "standard") or "standard"
+        job.progress = STAGE_PROGRESS_MAP.get("researching", 15)
         job.error_message = None
         job.updated_at = now
         db.commit()
@@ -65,15 +85,19 @@ def execute_research_job(job_id: str, query: str, research_type: str) -> Dict[st
         # ------------------------------------------------------------------
         # 2. Stage Change Listener for Real-time Progress
         # ------------------------------------------------------------------
-        def _update_stage(stage: str):
+        def _update_stage(stage: str, progress: Any = None):
             stage_db = SessionLocal()
             try:
                 cur_job = stage_db.query(Report).filter(Report.job_id == job_id).first()
                 if cur_job:
                     cur_job.stage = stage
+                    if isinstance(progress, int):
+                        cur_job.progress = progress
+                    else:
+                        cur_job.progress = STAGE_PROGRESS_MAP.get(stage, cur_job.progress or 0)
                     cur_job.updated_at = datetime.datetime.now(datetime.timezone.utc)
                     stage_db.commit()
-                    logger.info(f"[Worker] Job {job_id} progressed to stage: '{stage}'")
+                    logger.info(f"[Worker] Job {job_id} progressed to stage: '{stage}' ({cur_job.progress}%)")
             except Exception as ex:
                 logger.warning(f"[Worker] Failed to update stage for job {job_id}: {ex}")
             finally:
@@ -107,10 +131,11 @@ def execute_research_job(job_id: str, query: str, research_type: str) -> Dict[st
         # ------------------------------------------------------------------
         # 4. Execute Multi-Agent Pipeline
         # ------------------------------------------------------------------
+        effective_depth = depth or job.depth or "standard"
         result = orchestrator.run_pipeline(
             query=query,
             research_type=research_type,
-            depth="standard",
+            depth=effective_depth,
             on_stage_change=_update_stage,
             previous_data=prev_raw,
             previous_job_id=prev_job_id,
@@ -126,6 +151,7 @@ def execute_research_job(job_id: str, query: str, research_type: str) -> Dict[st
         if result.get("status") == "completed":
             job.status = "completed"
             job.stage = "completed"
+            job.progress = 100
             job.report_markdown = result.get("report", "")
             try:
                 job.raw_data = json.dumps({

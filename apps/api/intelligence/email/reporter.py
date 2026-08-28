@@ -129,7 +129,7 @@ class EmailIntelligenceReporter:
             if footprint.location:
                 lines.append(f"- **Location**: {footprint.location}")
             if footprint.top_languages:
-                lines.append(f"- **Primary Languages**: {', '.join(f'`{l}`' for l in footprint.top_languages)}")
+                lines.append(f"- **Primary Languages**: {', '.join(f'`{lang}`' for lang in footprint.top_languages)}")
             if footprint.organizations:
                 lines.append(f"- **Organizations**: {', '.join(footprint.organizations)}")
 
@@ -150,7 +150,7 @@ class EmailIntelligenceReporter:
                 lines.append("| :--- | :--- | :--- | :--- | :--- |")
                 for r in footprint.repositories[:6]:
                     desc = (r.description or "No description")[:55]
-                    lines.append(f"| [{r.name}]({r.url}) | `{r.language or 'N/A'}` | \u2b50 {r.stars} | \U0001f374 {r.forks} | {desc} |")
+                    lines.append(f"| [{r.name}]({r.url}) | `{r.language or 'N/A'}` | ⭐ {r.stars} | 🍴 {r.forks} | {desc} |")
 
             # Authored npm Packages
             if footprint.npm_packages:
@@ -160,7 +160,7 @@ class EmailIntelligenceReporter:
 
             # Evidence Graph Summary
             if footprint.evidence_graph and footprint.evidence_graph.edges:
-                lines.append("\n### \U0001f578\ufe0f GitHub Identity Evidence Graph")
+                lines.append("\n### 🕸️ GitHub Identity Evidence Graph")
                 lines.append(f"> **Graph Summary**: {footprint.evidence_graph.summary}")
                 lines.append("| Relationship | Source Node | Target Node | Strength |")
                 lines.append("| :--- | :--- | :--- | :--- |")
@@ -171,7 +171,7 @@ class EmailIntelligenceReporter:
         lines.append("")
 
         # ── 5. Public Web Footprint Search ──
-        lines.append("## \U0001f30e Public Web Footprint Search")
+        lines.append("## 🌐 Public Web Footprint Search")
         exact_mentions = [m for m in web_mentions if m.is_exact_match or m.correlation_type.value == "exact_email_mention"]
         profile_mentions = [m for m in web_mentions if m.mention_category.value == "developer_profile_mention" and not m.is_exact_match]
         forum_mentions = [m for m in web_mentions if m.mention_category.value == "forum_mention" and not m.is_exact_match]
@@ -179,22 +179,22 @@ class EmailIntelligenceReporter:
         other_mentions = [m for m in web_mentions if m not in exact_mentions and m not in profile_mentions and m not in forum_mentions and m not in doc_mentions]
 
         if exact_mentions:
-            lines.append("### \U0001f525 Exact Email Occurrences")
+            lines.append("### 🔥 Exact Email Occurrences")
             for m in exact_mentions[:5]:
                 lines.append(f"- [{m.title}]({m.canonical_url or m.url}) (`{m.domain}`)\n  > \"{m.snippet}\"")
 
         if profile_mentions:
-            lines.append("\n### \U0001f468\u200d\U0001f4bb Public Developer Profiles & Portfolios")
+            lines.append("\n### 👨‍💻 Public Developer Profiles & Portfolios")
             for m in profile_mentions[:4]:
                 lines.append(f"- [{m.title}]({m.canonical_url or m.url}) (`{m.domain}`)\n  > \"{m.snippet}\"")
 
         if forum_mentions:
-            lines.append("\n### \U0001f4ac Technical Community & Forum Citations")
+            lines.append("\n### 💬 Technical Community & Forum Citations")
             for m in forum_mentions[:3]:
                 lines.append(f"- [{m.title}]({m.canonical_url or m.url}) (`{m.domain}`)\n  > \"{m.snippet}\"")
 
         if doc_mentions:
-            lines.append("\n### \U0001f4c4 Documentation & Specification References")
+            lines.append("\n### 📄 Documentation & Specification References")
             for m in doc_mentions[:3]:
                 lines.append(f"- [{m.title}]({m.canonical_url or m.url}) (`{m.domain}`)\n  > \"{m.snippet}\"")
 
@@ -203,21 +203,36 @@ class EmailIntelligenceReporter:
         lines.append("")
 
         # ── 6. Breach Exposure Audit ──
-        lines.append("## \U0001f512 Security & Breach Exposure Audit")
+        lines.append("## 🔒 Security & Breach Exposure Audit")
         if breach_status == "unavailable":
             lines.append("> [!NOTE]\n> HaveIBeenPwned API key is unconfigured. Breach exposure auditing was skipped (`UNAVAILABLE`).")
         elif breaches:
-            lines.append(f"**Found {len(breaches)} verified public security breach disclosure(s)** involving this email:")
-            lines.append("| Breach Name | Domain | Severity | Date | Exposed Data Classes |")
-            lines.append("| :--- | :--- | :---: | :--- | :--- |")
+            verified_count = sum(1 for b in breaches if b.is_verified and not b.is_spam_list and not b.is_retired)
+            unverified_count = sum(1 for b in breaches if not b.is_verified)
+            spam_count = sum(1 for b in breaches if b.is_spam_list)
+            retired_count = sum(1 for b in breaches if b.is_retired)
+
+            lines.append(
+                f"- **Verified disclosures**: {verified_count}  \n"
+                f"- **Unverified disclosures**: {unverified_count}  \n"
+                f"- **Spam lists**: {spam_count}  \n"
+                f"- **Retired records**: {retired_count}\n"
+            )
+            lines.append("| Breach Name | Domain | Verification Status | Severity | Date | Exposed Data Classes |")
+            lines.append("| :--- | :--- | :--- | :---: | :--- | :--- |")
             for b in breaches:
+                status_label = "Verified" if b.is_verified and not b.is_spam_list and not b.is_retired else "Unverified Incident"
+                if b.is_spam_list:
+                    status_label = "Spam List"
+                elif b.is_retired:
+                    status_label = "Retired"
                 severity_badge = f"**{b.severity}**"
                 data_cls = ", ".join(f"`{c}`" for c in b.data_classes[:4])
-                lines.append(f"| **{b.breach_name}** | `{b.domain}` | {severity_badge} | {b.breach_date or 'Unknown'} | {data_cls} |")
+                lines.append(f"| **{b.breach_name}** | `{b.domain}` | `{status_label}` | {severity_badge} | {b.breach_date or 'Unknown'} | {data_cls} |")
             lines.append("\n> [!NOTE]\n> **What Breach Exposure Means**: A breach disclosure indicates this email appeared in a third-party service's historical public incident. It does not indicate account compromise on your personal systems.")
             lines.append("\n> [!CAUTION]\n> *Strict Privacy Policy: Zero passwords, plaintexts, or credentials are ever queried, retrieved, stored, or displayed.*")
         else:
-            lines.append("\u2705 *No public breach exposures discovered in audited security disclosures.*")
+            lines.append("✅ *No public breach exposures discovered in audited security disclosures.*")
         lines.append("")
 
 

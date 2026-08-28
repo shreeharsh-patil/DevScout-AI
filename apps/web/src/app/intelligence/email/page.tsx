@@ -6,12 +6,16 @@ import {
   ArrowRight,
   Download,
   RefreshCw,
+  Zap,
+  Layers,
+  Sparkles,
 } from "lucide-react";
 import Header from "@/components/layout/header";
 import Footer from "@/components/layout/footer";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { useResearch } from "@/hooks/useResearch";
+import type { ResearchDepth } from "@/types/research";
 import EmailIntelligenceView from "@/components/email/email-intelligence-view";
 import ResearchProgress from "@/components/research/research-progress";
 import MarkdownReport from "@/components/reports/markdown-report";
@@ -24,20 +28,27 @@ const EXAMPLES = [
   "founder@ycombinator.com",
 ];
 
+const DEPTH_OPTIONS: { key: ResearchDepth; label: string; desc: string; icon: React.ReactNode }[] = [
+  { key: "quick", label: "Quick", desc: "Fast syntax & GitHub/Gravatar check", icon: <Zap className="w-3.5 h-3.5" /> },
+  { key: "standard", label: "Standard", desc: "Multi-registry & web citation scan", icon: <Layers className="w-3.5 h-3.5" /> },
+  { key: "deep", label: "Deep", desc: "Full commit graphs & deep correlation", icon: <Sparkles className="w-3.5 h-3.5" /> },
+];
+
 export default function EmailIntelligencePage() {
   const [emailInput, setEmailInput] = useState("");
+  const [depth, setDepth] = useState<ResearchDepth>("standard");
   const [viewMode, setViewMode] = useState<"interactive" | "markdown">("interactive");
-  const { status, report, errorMessage, startResearch } = useResearch();
+  const { status, report, stage, progress, errorMessage, startResearch } = useResearch();
 
   const handleSearch = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!emailInput.trim()) return;
-    startResearch(emailInput.trim(), "email_intelligence");
+    startResearch(emailInput.trim(), "email_intelligence", depth);
   };
 
   const handleSelectExample = (ex: string) => {
     setEmailInput(ex);
-    startResearch(ex, "email_intelligence");
+    startResearch(ex, "email_intelligence", depth);
   };
 
   return (
@@ -61,8 +72,8 @@ export default function EmailIntelligencePage() {
           </p>
         </div>
 
-        {/* Search Bar */}
-        <div className="max-w-2xl mx-auto mb-8">
+        {/* Search Bar & Depth Selector */}
+        <div className="max-w-2xl mx-auto mb-8 space-y-4">
           <form onSubmit={handleSearch} className="relative flex items-center">
             <div className="absolute left-4 text-neutral-500">
               <Mail className="w-5 h-5" />
@@ -99,8 +110,32 @@ export default function EmailIntelligencePage() {
             </div>
           </form>
 
+          {/* Depth Mode Selector */}
+          <div className="flex items-center justify-center gap-2">
+            <span className="text-xs text-neutral-500 mr-1">Depth:</span>
+            {DEPTH_OPTIONS.map((opt) => {
+              const isSelected = depth === opt.key;
+              return (
+                <button
+                  key={opt.key}
+                  type="button"
+                  onClick={() => setDepth(opt.key)}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-medium transition-all ${
+                    isSelected
+                      ? "bg-indigo-600/20 text-indigo-300 border border-indigo-500/50 shadow-sm"
+                      : "bg-neutral-900/60 text-neutral-400 border border-neutral-800 hover:border-neutral-700 hover:text-neutral-200"
+                  }`}
+                  title={opt.desc}
+                >
+                  {opt.icon}
+                  <span>{opt.label}</span>
+                </button>
+              );
+            })}
+          </div>
+
           {/* Example query chips */}
-          <div className="flex flex-wrap items-center justify-center gap-2 mt-4 text-xs text-neutral-500">
+          <div className="flex flex-wrap items-center justify-center gap-2 mt-2 text-xs text-neutral-500">
             <span>Try example:</span>
             {EXAMPLES.map((ex) => (
               <button
@@ -119,7 +154,9 @@ export default function EmailIntelligencePage() {
         {status === "loading" && (
           <div className="max-w-xl mx-auto my-12">
             <ResearchProgress
-              stage={report?.stage || "researching"}
+              label="Email Intelligence"
+              stage={stage}
+              progress={progress}
               researchType="email_intelligence"
             />
           </div>

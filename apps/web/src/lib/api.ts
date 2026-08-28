@@ -230,7 +230,7 @@ export interface AuthMeResponse {
 export interface ResearchRequest {
   query: string;
   type: string;
-  depth?: string;
+  depth?: "quick" | "standard" | "deep";
 }
 
 export interface ResearchResponse {
@@ -244,6 +244,8 @@ export interface JobStatusResponse {
   workspace_id?: string;
   status: string;
   stage?: string;
+  progress?: number;
+  depth?: "quick" | "standard" | "deep";
   custom_title?: string;
   is_saved?: boolean;
   tags?: string[];
@@ -266,6 +268,8 @@ export interface HistoryItem {
   is_saved?: boolean;
   status: string;
   stage?: string;
+  progress?: number;
+  depth?: "quick" | "standard" | "deep";
   created_at: string;
   updated_at?: string;
 }
@@ -278,6 +282,8 @@ export interface ReportResponse {
   research_type: string;
   status: string;
   stage?: string;
+  progress?: number;
+  depth?: "quick" | "standard" | "deep";
   report_markdown?: string;
   sources?: ResearchSource[];
   created_at: string;

@@ -14,13 +14,10 @@ Generates transparent supporting (+) and contradicting (-) signal explanations.
 
 from __future__ import annotations
 
-from typing import List, Set
-from urllib.parse import urlparse
+from typing import Any, List, Set
 from .models import (
-    AccountFinding,
     ConfidenceAssessment,
     FindingStatus,
-    WebMentionFinding,
 )
 
 
@@ -29,12 +26,38 @@ class ConfidenceEngine:
 
     @staticmethod
     def evaluate(
-        account_findings: List[AccountFinding],
-        web_mentions: List[WebMentionFinding],
-        breaches_count: int,
+        account_findings: Any = None,
+        web_mentions: Any = None,
+        breaches_count: Any = 0,
         has_domain_ownership: bool = False,
-        is_role_account: bool = False
+        is_role_account: bool = False,
+        *args,
+        **kwargs
     ) -> ConfidenceAssessment:
+        from .models import EmailTarget
+
+        if isinstance(account_findings, EmailTarget):
+            target = account_findings
+            acc_list = web_mentions or []
+            web_list = breaches_count or []
+            breaches_arg = has_domain_ownership
+            breaches_num = len(breaches_arg) if isinstance(breaches_arg, list) else int(breaches_arg or 0)
+            dom_owner = bool(is_role_account)
+            role_acc = bool(kwargs.get("is_role_account", getattr(target, "is_role_account", False)))
+        else:
+            acc_list = account_findings if account_findings is not None else kwargs.get("account_findings", [])
+            web_list = web_mentions if web_mentions is not None else kwargs.get("web_mentions", [])
+            breaches_arg = breaches_count if breaches_count is not None else kwargs.get("breaches_count", 0)
+            breaches_num = len(breaches_arg) if isinstance(breaches_arg, list) else int(breaches_arg or 0)
+            dom_owner = bool(has_domain_ownership if has_domain_ownership is not None else kwargs.get("has_domain_ownership", False))
+            role_acc = bool(is_role_account if is_role_account is not None else kwargs.get("is_role_account", False))
+
+        account_findings = acc_list
+        web_mentions = web_list
+        breaches_count = breaches_num
+        has_domain_ownership = dom_owner
+        is_role_account = role_acc
+
         reasons: List[str] = []
         supporting_signals: List[str] = []
         contradicting_signals: List[str] = []
@@ -45,7 +68,7 @@ class ConfidenceEngine:
         probable_accounts = [a for a in account_findings if a.status == FindingStatus.PROBABLE]
         candidate_accounts = [a for a in account_findings if a.status == FindingStatus.CANDIDATE]
 
-        exact_web_mentions = [m for m in web_mentions if m.is_exact_match or m.correlation_type.value == "exact_email_mention"]
+        exact_web_mentions = [m for m in web_mentions if m.is_exact_match or getattr(getattr(m, "correlation_type", None), "value", "") == "exact_email_mention"]
 
         # ── Measure Source Independence ──
         independent_sources: Set[str] = set()
@@ -147,13 +170,14 @@ class ConfidenceEngine:
 
         # ── 2. Contradicting & Dampening Signals ──
         if is_role_account:
-            contradicting_signals.append("- Role-based departmental mailbox detected; individual personal identity attribution is restrained")
+            score = max(0, score - 20)
+            contradicting_signals.append("- Role-based departmental mailbox detected; individual personal identity attribution is restrained (-20)")
             reasons.append("Role-based address detected; evaluation reflects organizational/team presence rather than an individual person.")
 
         if not verified_accounts and not high_conf_accounts:
             if candidate_accounts:
-                score = min(score + 15, 35)
-                supporting_signals.append(f"+ {len(candidate_accounts)} candidate username lead(s) from email prefix (+15)")
+                score = min(score + 10, 35)
+                supporting_signals.append(f"+ {len(candidate_accounts)} candidate username lead(s) from email prefix (+10)")
                 contradicting_signals.append("- Zero cryptographic or commit proof found; all handles remain unverified hypotheses (-20)")
                 reasons.append(f"{len(candidate_accounts)} candidate username lead(s) discovered from email prefix (unverified).")
             else:
@@ -168,18 +192,18 @@ class ConfidenceEngine:
         # Clamp final score
         final_score = min(100, max(0, score))
 
-        # ── 3. Calibrated Level Assignment ──
-        # VERIFIED: 90-100
-        # HIGH_CONFIDENCE: 75-89
-        # PROBABLE: 50-74
-        # CANDIDATE: 1-49
-        # NO_EVIDENCE: 0
-        if final_score >= 90 or (len(verified_accounts) >= 2) or (has_github_commit_match and has_gravatar_profile):
+        # ── 3. Calibrated Level Assignment with Invariant Guarantees ──
+        # Invariants:
+        # 1. Candidate username matches alone MUST NOT yield VERIFIED or HIGH_CONFIDENCE.
+        # 2. Gravatar avatar presence alone MUST NOT promote unverified accounts to VERIFIED.
+        # 3. Multiple candidate handles without direct links MUST remain CANDIDATE or PROBABLE.
+        # 4. Role accounts MUST NOT be classified as VERIFIED personal identity.
+        if (final_score >= 90 or (len(verified_accounts) >= 2) or (has_github_commit_match and has_gravatar_profile)) and not is_role_account and verified_accounts:
             level = FindingStatus.VERIFIED
             final_score = max(90, final_score)
-        elif final_score >= 75 or verified_accounts:
-            level = FindingStatus.HIGH_CONFIDENCE if final_score < 90 else FindingStatus.VERIFIED
-        elif final_score >= 50 or (exact_web_mentions and breaches_count > 0) or has_domain_ownership:
+        elif (final_score >= 75 or (verified_accounts and not is_role_account)):
+            level = FindingStatus.HIGH_CONFIDENCE if final_score < 90 or is_role_account else FindingStatus.VERIFIED
+        elif final_score >= 50 or (exact_web_mentions and breaches_count > 0) or (has_domain_ownership and not is_role_account):
             level = FindingStatus.PROBABLE
         elif candidate_accounts and not is_role_account:
             level = FindingStatus.CANDIDATE

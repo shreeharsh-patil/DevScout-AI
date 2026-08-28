@@ -7,25 +7,34 @@ import { Card, CardContent } from "@/components/ui/card";
 interface ResearchProgressProps {
   label?: string;
   stage?: string;
+  progress?: number;
   researchType?: string;
 }
 
 const EMAIL_STAGES = [
-  { key: "validating_email", label: "Email syntax & domain validated" },
-  { key: "discovering_accounts", label: "Public accounts & Gravatar checked" },
-  { key: "searching_developer_sources", label: "GitHub & package registries queried" },
-  { key: "searching_web", label: "Public web mentions retrieved" },
-  { key: "checking_breaches", label: "Security & breach exposure audited" },
-  { key: "correlating_identity", label: "Identity & candidate handles correlated" },
-  { key: "generating_report", label: "Evidence-backed report generated" },
+  { key: "validating_email", label: "Email syntax & MX routing validated" },
+  { key: "checking_developer_sources", label: "Public developer registries & accounts queried" },
+  { key: "searching_public_web", label: "Public web citations & mentions searched" },
+  { key: "processing_account_findings", label: "Account findings & false positives calibrated" },
+  { key: "correlating_identities", label: "Cross-platform identity clusters correlated" },
+  { key: "scoring_evidence", label: "Deterministic confidence & evidence graph computed" },
+  { key: "building_report", label: "Evidence-backed intelligence report generated" },
 ];
 
-export default function ResearchProgress({ label = "Research", stage = "researching", researchType }: ResearchProgressProps) {
-  const isEmailIntel = researchType === "email_intelligence" || researchType === "email" || label.toLowerCase().includes("email");
+export default function ResearchProgress({
+  label = "Research",
+  stage = "researching",
+  progress = 0,
+  researchType,
+}: ResearchProgressProps) {
+  const isEmailIntel =
+    researchType === "email_intelligence" ||
+    researchType === "email" ||
+    label.toLowerCase().includes("email");
 
   // Determine stage progress for email
   const currentStageIndex = EMAIL_STAGES.findIndex((s) => s.key === stage);
-  const activeIdx = currentStageIndex >= 0 ? currentStageIndex : 1;
+  const activeIdx = currentStageIndex >= 0 ? currentStageIndex : 0;
 
   return (
     <Card className="bg-neutral-900/30 border-neutral-800 border-dashed min-h-[380px] flex items-center justify-center p-6">
@@ -43,6 +52,22 @@ export default function ResearchProgress({ label = "Research", stage = "research
             Pipeline: <span className="text-indigo-400 font-medium capitalize">{label}</span>
           </p>
         </div>
+
+        {/* Visual Progress Bar */}
+        {progress > 0 && (
+          <div className="w-full space-y-1.5 pt-1">
+            <div className="flex justify-between text-xs text-neutral-400">
+              <span>Overall Progress</span>
+              <span className="font-mono text-indigo-400 font-semibold">{progress}%</span>
+            </div>
+            <div className="w-full h-1.5 bg-neutral-800 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-indigo-500 rounded-full transition-all duration-300 ease-out"
+                style={{ width: `${Math.min(100, Math.max(0, progress))}%` }}
+              />
+            </div>
+          </div>
+        )}
 
         {/* Real Stage Tracker for Email Intelligence */}
         {isEmailIntel && (

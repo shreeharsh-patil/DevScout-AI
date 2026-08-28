@@ -134,6 +134,8 @@ class Report(Base):
     query = Column(String(500), nullable=False)
     status = Column(String(20), nullable=False, default="pending")
     stage = Column(String(32), nullable=True, default="pending")
+    depth = Column(String(20), nullable=False, default="standard")
+    progress = Column(Integer, nullable=False, default=0)
     report_markdown = Column(Text, nullable=True)
     raw_data = Column(Text, nullable=True)
     sources = Column(Text, nullable=True)
@@ -229,6 +231,10 @@ def ensure_tables() -> None:
                         conn.execute(text("ALTER TABLE reports ADD COLUMN is_saved BOOLEAN DEFAULT 0"))
                     if "tags" not in columns:
                         conn.execute(text("ALTER TABLE reports ADD COLUMN tags TEXT"))
+                    if "depth" not in columns:
+                        conn.execute(text("ALTER TABLE reports ADD COLUMN depth VARCHAR(20) DEFAULT 'standard'"))
+                    if "progress" not in columns:
+                        conn.execute(text("ALTER TABLE reports ADD COLUMN progress INTEGER DEFAULT 0"))
                     if "is_archived" not in columns:
                         conn.execute(text("ALTER TABLE reports ADD COLUMN is_archived BOOLEAN DEFAULT 0"))
                     conn.commit()

@@ -79,10 +79,14 @@ def get_queue(name: str = QUEUE_NAME) -> Optional[Queue]:
     return Queue(name, connection=conn)
 
 
+import time
+
+
 def enqueue_research_job(
     job_id: str,
     query: str,
     research_type: str,
+    depth: str = "standard",
     max_retries: int = 3,
     retry_backoff: Optional[list[int]] = None,
 ) -> Dict[str, Any]:
@@ -108,6 +112,7 @@ def enqueue_research_job(
             job_id,
             query,
             research_type,
+            depth,
             job_id=f"rq_{job_id}",
             result_ttl=86400,          # 24 hours
             failure_ttl=604800,        # 7 days
@@ -115,7 +120,7 @@ def enqueue_research_job(
         )
 
 
-        logger.info(f"Enqueued research job {job_id} into RQ queue '{QUEUE_NAME}' (RQ ID: {rq_job.id})")
+        logger.info(f"Enqueued research job {job_id} (depth: {depth}) into RQ queue '{QUEUE_NAME}' (RQ ID: {rq_job.id})")
         return {
             "queued": True,
             "queue_type": "redis_rq",
@@ -153,6 +158,10 @@ def get_queue_health() -> Dict[str, Any]:
         workers = Worker.all(connection=conn)
         queue_workers = [w for w in workers if QUEUE_NAME in w.queue_names()]
 
+        t_ping_start = time.perf_counter()
+        conn.ping()
+        redis_ping_ms = round((time.perf_counter() - t_ping_start) * 1000, 2)
+
         return {
             "status": "healthy",
             "redis_connected": True,
@@ -162,7 +171,7 @@ def get_queue_health() -> Dict[str, Any]:
             "total_workers": len(workers),
             "jobs_queued": len(q),
             "jobs_failed": q.failed_job_registry.count,
-            "redis_ping_ms": round(conn.ping() and 0.5, 2)
+            "redis_ping_ms": redis_ping_ms
         }
     except Exception as e:
         logger.error(f"Error inspecting queue health: {e}")

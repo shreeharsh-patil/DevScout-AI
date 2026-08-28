@@ -101,13 +101,16 @@ class ProviderRegistry:
         target: EmailTarget,
         concurrent: bool = True,
         max_workers: int = 6,
-        provider_names: Optional[List[str]] = None
+        provider_names: Optional[List[str]] = None,
+        timeout: float = 25.0
     ) -> Dict[str, ProviderResult]:
         """
         Executes all (or specified) providers for given target safely.
         Guarantees:
-        - Independent concurrent execution where safe.
-        - Per-provider timeout.
+        - Independent concurrent execution where safe with bounded worker pool.
+        - Per-provider timeout + overall stage timeout.
+        - Non-blocking executor shutdown on timeout / cancellation.
+        - Returns UNAVAILABLE (never NO_EVIDENCE) on provider timeout.
         - Error isolation: one failing provider never fails other providers.
         """
         results: Dict[str, ProviderResult] = {}
@@ -124,13 +127,14 @@ class ProviderRegistry:
                 results[name] = provider.execute(target)
             return results
 
-        # Concurrent execution with ThreadPoolExecutor
+        # Concurrent execution with bounded ThreadPoolExecutor
         futures = {}
-        with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="devscout-provider") as executor:
+        executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="devscout-provider")
+        try:
             for name, provider in selected_providers.items():
                 futures[executor.submit(provider.execute, target)] = name
 
-            for future in as_completed(futures):
+            for future in as_completed(futures, timeout=timeout):
                 name = futures[future]
                 try:
                     results[name] = future.result()
@@ -146,6 +150,38 @@ class ProviderRegistry:
                         error=f"Provider execution exception: {str(e)}",
                         metadata={"exception": str(e)}
                     )
+
+        except TimeoutError:
+            logger.warning(f"[ProviderRegistry] Overall execution timed out after {timeout}s")
+            for future, name in futures.items():
+                if name not in results:
+                    future.cancel()
+                    results[name] = ProviderResult(
+                        provider=name,
+                        finding_type="account",
+                        status=FindingStatus.UNAVAILABLE,
+                        confidence_level=FindingStatus.UNAVAILABLE,
+                        confidence_score=0.0,
+                        retrieved_at=utc_now_iso(),
+                        error=f"Provider '{name}' timed out after {timeout}s.",
+                        metadata={"timed_out": True}
+                    )
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
+
+        # Guarantee all selected providers have a result entry
+        for name in selected_providers:
+            if name not in results:
+                results[name] = ProviderResult(
+                    provider=name,
+                    finding_type="account",
+                    status=FindingStatus.UNAVAILABLE,
+                    confidence_level=FindingStatus.UNAVAILABLE,
+                    confidence_score=0.0,
+                    retrieved_at=utc_now_iso(),
+                    error=f"Provider '{name}' did not complete execution.",
+                    metadata={"unexecuted": True}
+                )
 
         return results
 

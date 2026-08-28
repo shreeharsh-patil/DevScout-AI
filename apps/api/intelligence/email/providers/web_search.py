@@ -8,7 +8,7 @@ and classifies results into structured categories (exact mention, developer prof
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, List, Optional, Set
+from typing import List, Set
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 from loguru import logger
 import requests

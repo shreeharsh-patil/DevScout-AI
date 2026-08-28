@@ -1,19 +1,10 @@
-"use client";
-
 import React, { useMemo, useState } from "react";
 import {
   ShieldCheck,
-  CheckCircle2,
-  AlertCircle,
-  ExternalLink,
-  Info,
-  Maximize2,
   ZoomIn,
   ZoomOut,
   RotateCcw,
   Network,
-  Layers,
-  Database,
 } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -26,7 +17,7 @@ export interface GraphNode {
   confidence: number;
   value?: string;
   sources?: string[];
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 export interface GraphEdge {
@@ -53,10 +44,9 @@ interface EvidenceGraphViewProps {
   queryEmail?: string;
 }
 
-export function EvidenceGraphView({ graphData, queryEmail }: EvidenceGraphViewProps) {
+export function EvidenceGraphView({ graphData }: EvidenceGraphViewProps) {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [zoom, setZoom] = useState<number>(1);
-  const [filterType, setFilterType] = useState<string>("ALL");
 
   const nodes = useMemo(() => graphData?.nodes || [], [graphData]);
   const edges = useMemo(() => graphData?.edges || [], [graphData]);

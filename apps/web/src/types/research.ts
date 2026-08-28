@@ -17,6 +17,8 @@ export type ResearchType =
   | "repository";
 
 
+export type ResearchDepth = "quick" | "standard" | "deep";
+
 export type ResearchStatus = "idle" | "loading" | "success" | "error" | "rate_limited";
 
 // ─── Detection result ────────────────────────────────────────────────────────
@@ -51,8 +53,9 @@ export interface ResearchReport {
   status: string;
   query?: string;
   stage?: string;
+  progress?: number;
+  depth?: ResearchDepth;
   custom_title?: string;
-
   is_saved?: boolean;
   tags?: string[];
   research_type?: string;
@@ -67,12 +70,16 @@ export interface ResearchReport {
   message?: string;
 }
 
-
 export interface HistoryItem {
   job_id: string;
   query: string;
   research_type: string;
   status: string;
+  stage?: string;
+  progress?: number;
+  depth?: ResearchDepth;
+  custom_title?: string;
+  is_saved?: boolean;
   created_at: string;
 }
 
@@ -82,6 +89,10 @@ export interface FullReport {
   research_type: string;
   status: string;
   stage?: string;
+  progress?: number;
+  depth?: ResearchDepth;
+  custom_title?: string;
+  is_saved?: boolean;
   report?: string;
   report_markdown?: string;
   sources?: ResearchSource[];

@@ -26,19 +26,27 @@ class AgentOrchestrator:
         query: str,
         research_type: str,
         depth: str = "standard",
-        on_stage_change: Optional[Callable[[str], None]] = None,
+        on_stage_change: Optional[Callable[..., None]] = None,
         previous_data: Optional[Dict] = None,
         previous_job_id: Optional[str] = None,
         previous_created_at: Optional[str] = None
     ) -> Dict:
         logger.info("orchestrator_pipeline_started", research_type=research_type, depth=depth)
         
-        def _notify_stage(stage: str):
+        def _notify_stage(stage: str, progress: Optional[int] = None):
             if on_stage_change:
                 try:
-                    on_stage_change(stage)
-                except Exception as ex:
-                    logger.warning(f"Failed to trigger stage callback for '{stage}': {ex}")
+                    import inspect
+                    sig = inspect.signature(on_stage_change)
+                    if len(sig.parameters) >= 2:
+                        on_stage_change(stage, progress)
+                    else:
+                        on_stage_change(stage)
+                except Exception:
+                    try:
+                        on_stage_change(stage)
+                    except Exception as ex:
+                        logger.warning(f"Failed to trigger stage callback for '{stage}': {ex}")
 
         raw_data = {}
         analysis = {}
@@ -46,13 +54,13 @@ class AgentOrchestrator:
 
         try:
             # 1. Research Phase
-            _notify_stage("researching")
+            _notify_stage("researching", 15)
             
             if research_type == "developer":
                 raw_data = self.researcher.fetch_github_profile(query)
-                _notify_stage("analyzing")
+                _notify_stage("analyzing", 75)
                 analysis = self.analyzer.analyze_developer(raw_data)
-                _notify_stage("reporting")
+                _notify_stage("reporting", 90)
                 report = self.reporter.generate_markdown_report(analysis, research_type)
                 
             elif research_type == "startup":
@@ -67,15 +75,15 @@ class AgentOrchestrator:
                     snippet=web_text[:250] if web_text else ""
                 )
                 raw_data = {"website_text": web_text, "sources": sc.get_sources()}
-                _notify_stage("analyzing")
+                _notify_stage("analyzing", 75)
                 analysis = self.analyzer.analyze_startup(raw_data["website_text"])
                 analysis["sources"] = raw_data.get("sources", [])
-                _notify_stage("reporting")
+                _notify_stage("reporting", 90)
                 report = self.reporter.generate_markdown_report(analysis, research_type)
 
             elif research_type in ("email_intelligence", "email"):
                 from intelligence.email import EmailIntelligenceOrchestrator
-                email_orch = EmailIntelligenceOrchestrator(on_progress=lambda stg, pct: _notify_stage(stg))
+                email_orch = EmailIntelligenceOrchestrator(on_progress=lambda stg, pct: _notify_stage(stg, pct))
                 intel_result = email_orch.execute(
                     query,
                     depth=depth,

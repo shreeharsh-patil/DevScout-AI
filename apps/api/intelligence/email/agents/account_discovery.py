@@ -7,42 +7,63 @@ normalizing results and guaranteeing complete error isolation.
 
 from __future__ import annotations
 
-from typing import List
-from loguru import logger
-from ..models import AccountFinding
-from ..providers import (
-    BaseProvider,
-    CratesProvider,
-    GitHubProvider,
-    GitLabProvider,
-    GravatarProvider,
-    NpmProvider,
-    PyPIProvider,
-)
+from typing import List, Optional
+from ..models import AccountFinding, EmailTarget
+from ..registry import ProviderRegistry, default_registry
 
 
 class AccountDiscoveryAgent:
-    """Discovers public developer accounts across supported public platforms."""
+    """
+    Facade for discovering public developer accounts across supported public platforms.
+    Delegates to centralized ProviderRegistry to avoid duplicate registries.
+    """
 
-    def __init__(self):
-        self.providers: List[BaseProvider] = [
-            GitHubProvider(),
-            GravatarProvider(),
-            NpmProvider(),
-            GitLabProvider(),
-            PyPIProvider(),
-            CratesProvider(),
+    def __init__(self, registry: Optional[ProviderRegistry] = None):
+        self.registry = registry or default_registry
+        self.account_provider_names = ["github", "gravatar", "npm", "gitlab", "pypi", "crates"]
+
+    @property
+    def providers(self):
+        """Backward-compatibility property returning active provider instances."""
+        return [
+            self.registry.get(name) for name in self.account_provider_names
+            if self.registry.get(name) is not None
         ]
 
-    def discover_all(self, email: str, local_part: str, domain: str) -> List[AccountFinding]:
+    def discover_all(
+        self,
+        email: str,
+        local_part: str,
+        domain: str,
+        depth: str = "standard"
+    ) -> List[AccountFinding]:
+        target = EmailTarget(
+            raw_email=email,
+            normalized_email=email,
+            local_part=local_part,
+            domain=domain,
+            is_valid=True
+        )
+        non_account_names = {"web_search", "web", "breach", "hibp", "email_validator"}
+        all_registered = self.registry.list_providers()
+        custom_account_names = [p for p in all_registered if p not in non_account_names]
+
+        if depth == "quick":
+            selected_names = [p for p in ("github", "gravatar") if p in all_registered]
+        else:
+            selected_names = custom_account_names if custom_account_names else self.account_provider_names
+
+        results = self.registry.execute_all(
+            target=target,
+            concurrent=True,
+            max_workers=6,
+            provider_names=selected_names
+        )
+
         all_findings: List[AccountFinding] = []
-
-        for provider in self.providers:
-            try:
-                findings = provider.search(email, local_part, domain)
-                if findings:
-                    all_findings.extend(findings)
-            except Exception as e:
-                logger.warning(f"[{provider.provider_name}] Unhandled exception in discovery: {e}")
-
+        for name, res in results.items():
+            if res and res.findings:
+                for f in res.findings:
+                    if isinstance(f, AccountFinding):
+                        all_findings.append(f)
         return all_findings

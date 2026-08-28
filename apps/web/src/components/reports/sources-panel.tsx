@@ -14,7 +14,6 @@ import {
   Search,
   Filter,
   X,
-  FileCode,
 } from "lucide-react";
 import type { ResearchSource } from "@/types/research";
 import { Badge } from "@/components/ui/badge";

@@ -12,8 +12,7 @@ Implements:
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, List, Optional, Set, Tuple
-from urllib.parse import urlparse
+from typing import Any, Dict, List, Set, Tuple
 from .models import (
     AccountFinding,
     BreachFinding,

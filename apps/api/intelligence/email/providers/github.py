@@ -35,7 +35,7 @@ from ..models import (
     ProviderResult,
     utc_now_iso,
 )
-from .base import BaseEmailProvider
+from .base import BaseEmailProvider, ProviderHealthStatus
 
 
 class GitHubEmailProvider(BaseEmailProvider):
@@ -55,11 +55,28 @@ class GitHubEmailProvider(BaseEmailProvider):
         email = target.normalized_email or target.raw_email
         local_part = target.local_part
         domain = target.domain
+        depth = getattr(target, "depth", "standard") or "standard"
 
-        findings, commits = self.search_with_commits(email=email, local_part=local_part, domain=domain, target=target)
+        self._last_error = None
+        findings, commits = self.search_with_commits(
+            email=email, local_part=local_part, domain=domain, target=target, depth=depth
+        )
         all_evidence: List[Evidence] = []
         for f in findings:
             all_evidence.extend(f.evidence)
+
+        if (self._rate_limited or self._last_error or self._health_status == ProviderHealthStatus.RATE_LIMITED) and not findings:
+            return ProviderResult(
+                provider=self.provider_name,
+                finding_type="account",
+                status=FindingStatus.UNAVAILABLE,
+                confidence_level=FindingStatus.UNAVAILABLE,
+                confidence_score=0.0,
+                retrieved_at=utc_now_iso(),
+                error=self._last_error or "GitHub API rate limit exceeded or access forbidden (HTTP 403/429)",
+                findings=[],
+                metadata={"rate_limited": bool(self._rate_limited)}
+            )
 
         if not findings:
             return ProviderResult(
@@ -103,7 +120,7 @@ class GitHubEmailProvider(BaseEmailProvider):
             }
         )
 
-    def search(self, email: str, local_part: str, domain: str) -> List[AccountFinding]:
+    def search(self, email: str, local_part: str, domain: str, depth: str = "standard") -> List[AccountFinding]:
         target = EmailTarget(
             raw_email=email,
             normalized_email=email,
@@ -111,135 +128,177 @@ class GitHubEmailProvider(BaseEmailProvider):
             domain=domain,
             is_valid=True
         )
-        findings, _ = self.search_with_commits(email, local_part, domain, target=target)
+        findings, _ = self.search_with_commits(email, local_part, domain, target=target, depth=depth)
         return findings
 
     def search_with_commits(
-        self, email: str, local_part: str, domain: str, target: Optional[EmailTarget] = None
+        self,
+        email: str,
+        local_part: str,
+        domain: str,
+        target: Optional[EmailTarget] = None,
+        depth: str = "standard"
     ) -> Tuple[List[AccountFinding], List[GitHubCommitRecord]]:
-        findings: List[AccountFinding] = []
+        account_map: Dict[str, AccountFinding] = {}
         all_commits: List[GitHubCommitRecord] = []
-        found_logins: set[str] = set()
+        error_reason: Optional[str] = None
+        clean_depth = depth.lower() if depth in ("quick", "standard", "deep") else "standard"
 
-        # ── Strategy 1: Public Commit Search (VERIFIED - exact author/committer email) ──
-        try:
-            commit_headers = {
-                **self.headers,
-                "Accept": "application/vnd.github.cloak-preview+json",
-            }
-            url = f"https://api.github.com/search/commits?q=author-email:{requests.utils.quote(email)}&per_page=6&sort=author-date"
-            resp = self._safe_request(url, headers=commit_headers)
-            if resp and resp.status_code == 200:
-                items = resp.json().get("items", [])
-                for item in items:
-                    commit_obj = item.get("commit", {})
-                    author_meta = commit_obj.get("author", {})
-                    author = item.get("author") or {}
-                    committer = item.get("committer") or {}
-                    commit_sha = item.get("sha", "")[:8]
-                    repo_info = item.get("repository", {})
-                    repo_name = repo_info.get("full_name", "")
-                    commit_url = item.get("html_url", "")
-                    commit_msg = commit_obj.get("message", "")
-                    commit_date = author_meta.get("date")
+        # ── Strategy 1: Public Commit Search (STANDARD / DEEP only) ──
+        if clean_depth != "quick":
+            try:
+                commit_headers = {
+                    **self.headers,
+                    "Accept": "application/vnd.github.cloak-preview+json",
+                }
+                commit_limit = 15 if clean_depth == "deep" else 6
+                url = f"https://api.github.com/search/commits?q=author-email:{requests.utils.quote(email)}&per_page={commit_limit}&sort=author-date"
+                resp = self._safe_request(url, headers=commit_headers)
+                if resp is not None:
+                    if resp.status_code == 200:
+                        items = resp.json().get("items", [])
+                        for item in items:
+                            commit_obj = item.get("commit", {})
+                            author_meta = commit_obj.get("author", {})
+                            author = item.get("author") or {}
+                            committer = item.get("committer") or {}
+                            commit_sha = item.get("sha", "")[:8]
+                            repo_info = item.get("repository", {})
+                            repo_name = repo_info.get("full_name", "")
+                            commit_url = item.get("html_url", "")
+                            commit_msg = commit_obj.get("message", "")
+                            commit_date = author_meta.get("date")
 
-                    commit_record = GitHubCommitRecord(
-                        sha=commit_sha,
-                        repo_name=repo_name,
-                        repo_url=repo_info.get("html_url", f"https://github.com/{repo_name}"),
-                        author_name=author_meta.get("name", ""),
-                        author_email=author_meta.get("email", email),
-                        commit_date=commit_date,
-                        commit_message=commit_msg[:120] if commit_msg else None,
-                        commit_url=commit_url
-                    )
-                    all_commits.append(commit_record)
-
-                    for actor in [author, committer]:
-                        login = actor.get("login")
-                        if login and login not in found_logins:
-                            found_logins.add(login)
-                            profile_data = self._fetch_user_profile(login)
-
-                            ev_id = f"gh_commit_{commit_sha}"
-                            evidence_item = Evidence(
-                                evidence_id=ev_id,
-                                provider="github",
-                                source_type="public_commit",
-                                title=f"GitHub Commit in {repo_name} ({commit_sha})",
-                                url=commit_url or f"https://github.com/{login}",
-                                retrieved_at=utc_now_iso(),
-                                supports="github_identity",
-                                strength="deterministic",
-                                snippet=f"Public commit {commit_sha} in {repo_name} lists '{email}' as author/committer.",
-                                raw_data={"login": login, "sha": commit_sha, "repo": repo_name, "message": commit_msg[:100]},
-                                metadata={"category": EvidenceCategory.EXACT_EMAIL.value}
+                            commit_record = GitHubCommitRecord(
+                                sha=commit_sha,
+                                repo_name=repo_name,
+                                repo_url=repo_info.get("html_url", f"https://github.com/{repo_name}"),
+                                author_name=author_meta.get("name", ""),
+                                author_email=author_meta.get("email", email),
+                                commit_date=commit_date,
+                                commit_message=commit_msg[:120] if commit_msg else None,
+                                commit_url=commit_url
                             )
+                            all_commits.append(commit_record)
 
-                            finding = self._build_account_finding(
-                                login=login,
-                                profile_data=profile_data,
-                                status=FindingStatus.VERIFIED,
-                                confidence_score=1.0,
-                                method="public_commit_author_email",
-                                evidence=[evidence_item],
-                                recent_repo=repo_name,
-                                actor_avatar=actor.get("avatar_url")
-                            )
-                            findings.append(finding)
-        except Exception as e:
-            logger.debug(f"[GitHubEmailProvider] Commit search error: {e}")
+                            for actor in [author, committer]:
+                                login = actor.get("login")
+                                if login:
+                                    ev_id = f"gh_commit_{commit_sha}"
+                                    evidence_item = Evidence(
+                                        evidence_id=ev_id,
+                                        provider="github",
+                                        source_type="public_commit",
+                                        title=f"GitHub Commit in {repo_name} ({commit_sha})",
+                                        url=commit_url or f"https://github.com/{login}",
+                                        retrieved_at=utc_now_iso(),
+                                        supports="github_identity",
+                                        strength="deterministic",
+                                        snippet=f"Public commit {commit_sha} in {repo_name} lists '{email}' as author/committer.",
+                                        raw_data={"login": login, "sha": commit_sha, "repo": repo_name, "message": commit_msg[:100]},
+                                        metadata={"category": EvidenceCategory.EXACT_EMAIL.value}
+                                    )
+
+                                    if login in account_map:
+                                        # Aggregate evidence into existing account finding
+                                        existing_finding = account_map[login]
+                                        if not any(e.evidence_id == ev_id for e in existing_finding.evidence):
+                                            existing_finding.evidence.append(evidence_item)
+                                            existing_finding.evidence_ids.append(ev_id)
+                                    else:
+                                        profile_data = self._fetch_user_profile(login)
+                                        finding = self._build_account_finding(
+                                            login=login,
+                                            profile_data=profile_data,
+                                            status=FindingStatus.VERIFIED,
+                                            confidence_score=1.0,
+                                            method="public_commit_author_email",
+                                            evidence=[evidence_item],
+                                            recent_repo=repo_name,
+                                            actor_avatar=actor.get("avatar_url")
+                                        )
+                                        account_map[login] = finding
+                    elif resp.status_code in (403, 429):
+                        error_reason = "GitHub API rate limit exceeded or access forbidden (HTTP 403/429)"
+                        self._rate_limited = True
+                        self._last_error = error_reason
+                    elif resp.status_code >= 500:
+                        error_reason = f"GitHub API server error (HTTP {resp.status_code})"
+                        self._last_error = error_reason
+            except Exception as e:
+                logger.debug(f"[GitHubEmailProvider] Commit search error: {e}")
+                error_reason = str(e)
+                self._last_error = error_reason
 
         # ── Strategy 2: Profile Email Match (VERIFIED - public email on profile) ──
         try:
-            url = f"https://api.github.com/search/users?q={requests.utils.quote(email)}+in:email&per_page=5"
+            profile_limit = 10 if clean_depth == "deep" else 5
+            url = f"https://api.github.com/search/users?q={requests.utils.quote(email)}+in:email&per_page={profile_limit}"
             resp = self._safe_request(url, headers=self.headers)
-            if resp and resp.status_code == 200:
-                for u in resp.json().get("items", []):
-                    login = u.get("login", "")
-                    if login and login not in found_logins:
-                        found_logins.add(login)
-                        profile_data = self._fetch_user_profile(login)
+            if resp is not None:
+                if resp.status_code == 200:
+                    for u in resp.json().get("items", []):
+                        login = u.get("login", "")
+                        if login:
+                            ev_id = f"gh_profile_{login}"
+                            evidence_item = Evidence(
+                                evidence_id=ev_id,
+                                provider="github",
+                                source_type="profile_email",
+                                title=f"GitHub Profile Email: {login}",
+                                url=f"https://github.com/{login}",
+                                retrieved_at=utc_now_iso(),
+                                supports="github_identity",
+                                strength="deterministic",
+                                snippet=f"User profile '{login}' publicly displays email address '{email}'.",
+                                metadata={"category": EvidenceCategory.EXACT_EMAIL.value}
+                            )
 
-                        ev_id = f"gh_profile_{login}"
-                        evidence_item = Evidence(
-                            evidence_id=ev_id,
-                            provider="github",
-                            source_type="profile_email",
-                            title=f"GitHub Profile Email: {login}",
-                            url=f"https://github.com/{login}",
-                            retrieved_at=utc_now_iso(),
-                            supports="github_identity",
-                            strength="deterministic",
-                            snippet=f"User profile '{login}' publicly displays email address '{email}'.",
-                            raw_data=profile_data,
-                            metadata={"category": EvidenceCategory.EXACT_EMAIL.value}
-                        )
-
-                        finding = self._build_account_finding(
-                            login=login,
-                            profile_data=profile_data,
-                            status=FindingStatus.VERIFIED,
-                            confidence_score=1.0,
-                            method="public_profile_email",
-                            evidence=[evidence_item],
-                            actor_avatar=u.get("avatar_url")
-                        )
-                        findings.append(finding)
+                            if login in account_map:
+                                existing_finding = account_map[login]
+                                if not any(e.evidence_id == ev_id for e in existing_finding.evidence):
+                                    existing_finding.evidence.append(evidence_item)
+                                    existing_finding.evidence_ids.append(ev_id)
+                                existing_finding.status = FindingStatus.VERIFIED
+                                existing_finding.confidence_score = 1.0
+                                existing_finding.public_email_match = True
+                            else:
+                                profile_data = self._fetch_user_profile(login)
+                                finding = self._build_account_finding(
+                                    login=login,
+                                    profile_data=profile_data,
+                                    status=FindingStatus.VERIFIED,
+                                    confidence_score=1.0,
+                                    method="public_profile_email",
+                                    evidence=[evidence_item],
+                                    actor_avatar=u.get("avatar_url")
+                                )
+                                account_map[login] = finding
+                elif resp.status_code in (403, 429):
+                    error_reason = "GitHub API rate limit exceeded (HTTP 403/429)"
+                    self._rate_limited = True
+                    self._last_error = error_reason
+                elif resp.status_code >= 500 and not error_reason:
+                    error_reason = f"GitHub API server error (HTTP {resp.status_code})"
+                    self._last_error = error_reason
         except Exception as e:
             logger.debug(f"[GitHubEmailProvider] Profile search error: {e}")
+            if not error_reason:
+                error_reason = str(e)
+                self._last_error = error_reason
 
-        # ── Strategy 3: Handle Prefix Guess (STRICTLY CANDIDATE / PROBABLE) ──
-        if local_part and local_part.lower() not in [login.lower() for login in found_logins]:
+        # ── Strategy 3: Handle Prefix Guess (STANDARD / DEEP only - STRICTLY CANDIDATE / PROBABLE) ──
+        if clean_depth != "quick" and local_part and local_part.lower() not in [k.lower() for k in account_map]:
             candidate_handle = local_part.strip()
             clean_handle = candidate_handle.replace(".", "").replace("+", "")
             for handle in [candidate_handle, clean_handle]:
-                if not handle or len(handle) < 2 or handle in found_logins:
+                if not handle or len(handle) < 2 or handle.lower() in [k.lower() for k in account_map]:
                     continue
                 profile = self._fetch_user_profile(handle)
                 if profile and profile.get("login"):
                     login = profile["login"]
-                    found_logins.add(login)
+                    if login.lower() in [k.lower() for k in account_map]:
+                        continue
 
                     pub_email = (profile.get("email") or "").strip().lower()
                     bio = (profile.get("bio") or "").lower()
@@ -295,9 +354,10 @@ class GitHubEmailProvider(BaseEmailProvider):
                         method=method,
                         evidence=[evidence_item]
                     )
-                    findings.append(finding)
+                    account_map[login] = finding
                     break
 
+        findings = list(account_map.values())
         return findings, all_commits
 
     def _build_account_finding(

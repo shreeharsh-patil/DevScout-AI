@@ -185,11 +185,30 @@ class BaseEmailProvider(ABC):
             elapsed_ms = round((time.perf_counter() - start_time) * 1000, 2)
             self._last_execution_time_ms = elapsed_ms
             self._last_error = None
-            self._health_status = ProviderHealthStatus.HEALTHY
+            if not self._rate_limited:
+                self._health_status = ProviderHealthStatus.HEALTHY
 
             # Ensure execution_time_ms is preserved in result metadata
             result.metadata["execution_time_ms"] = elapsed_ms
             return result
+
+        except (requests.Timeout, TimeoutError) as e:
+            elapsed_ms = round((time.perf_counter() - start_time) * 1000, 2)
+            self._last_execution_time_ms = elapsed_ms
+            self._last_error = f"Timeout after {self.timeout}s: {e}"
+            self._health_status = ProviderHealthStatus.DEGRADED
+            logger.warning(f"[{self.provider_name}] Provider execution timed out: {e}")
+
+            return ProviderResult(
+                provider=self.provider_name,
+                finding_type="account",
+                status=FindingStatus.UNAVAILABLE,
+                confidence_level=FindingStatus.UNAVAILABLE,
+                confidence_score=0.0,
+                retrieved_at=utc_now_iso(),
+                error=f"Provider '{self.provider_name}' timed out after {self.timeout}s.",
+                metadata={"execution_time_ms": elapsed_ms, "exception": str(e), "timed_out": True}
+            )
 
         except Exception as e:
             elapsed_ms = round((time.perf_counter() - start_time) * 1000, 2)
@@ -218,13 +237,11 @@ class BaseEmailProvider(ABC):
         timeout: Optional[float] = None,
     ) -> Optional[requests.Response]:
         """
-        Executes HTTP request with:
-        - Rate limit detection (HTTP 429)
-        - Exponential backoff ONLY on temporary failures (HTTP 5xx, timeouts, connection errors)
-        - Provider isolation
+        Executes outbound HTTP request via centralized HTTP client.
+        Captures rate-limits (HTTP 429), server errors (5xx), and connection timeouts,
+        retrying only transient server/network errors when max_retries > 0.
         """
         req_timeout = timeout or self.timeout
-        backoff = 1.0
 
         for attempt in range(self.max_retries + 1):
             try:
@@ -233,31 +250,29 @@ class BaseEmailProvider(ABC):
                 else:
                     resp = requests.request(method, url, headers=headers, json=json_body, timeout=req_timeout)
 
-                # Handle Rate Limit (HTTP 429)
+                # Handle Rate Limit (HTTP 429) - never loop retry on 429 to avoid retry storms
                 if resp.status_code == 429:
                     self._rate_limited = True
                     self._health_status = ProviderHealthStatus.RATE_LIMITED
                     retry_after = resp.headers.get("Retry-After")
+                    if retry_after:
+                        self._rate_limit_reset_at = retry_after
                     logger.warning(
                         f"[{self.provider_name}] HTTP 429 Rate Limited on {url}. Retry-After: {retry_after}"
                     )
-                    if attempt < self.max_retries:
-                        sleep_time = float(retry_after) if (retry_after and retry_after.isdigit()) else backoff
-                        time.sleep(sleep_time)
-                        backoff *= self.backoff_factor
-                        continue
                     return resp
 
                 # Non-retriable client errors (400, 401, 403, 404, etc.)
                 if 400 <= resp.status_code < 500:
+                    self._rate_limited = False
                     return resp
 
-                # Temporary server errors (500, 502, 503, 504) -> retry with backoff
+                # Server errors (500, 502, 503, 504) -> retry if attempts remaining
                 if resp.status_code >= 500:
                     self._health_status = ProviderHealthStatus.DEGRADED
+                    self._last_error = f"Server returned HTTP {resp.status_code}"
                     if attempt < self.max_retries:
-                        time.sleep(backoff)
-                        backoff *= self.backoff_factor
+                        time.sleep(0.01)
                         continue
                     return resp
 
@@ -265,17 +280,24 @@ class BaseEmailProvider(ABC):
                 self._rate_limited = False
                 return resp
 
-            except (requests.Timeout, requests.ConnectionError) as e:
-                # Temporary network/timeout error -> retry
-                logger.debug(f"[{self.provider_name}] Transient network error on {url} (attempt {attempt+1}): {e}")
+            except (requests.Timeout, TimeoutError) as e:
+                logger.debug(f"[{self.provider_name}] Network timeout on {url}: {e}")
                 self._health_status = ProviderHealthStatus.DEGRADED
+                self._last_error = f"Timeout: {e}"
                 if attempt < self.max_retries:
-                    time.sleep(backoff)
-                    backoff *= self.backoff_factor
-                else:
-                    return None
+                    time.sleep(0.01)
+                    continue
+                return None
+            except requests.RequestException as e:
+                logger.debug(f"[{self.provider_name}] Network error on {url}: {e}")
+                self._health_status = ProviderHealthStatus.DEGRADED
+                self._last_error = str(e)
+                if attempt < self.max_retries:
+                    time.sleep(0.01)
+                    continue
+                return None
             except Exception as e:
-                logger.debug(f"[{self.provider_name}] Unexpected request failure on {url}: {e}")
+                logger.debug(f"[{self.provider_name}] Unexpected failure on {url}: {e}")
                 self._last_error = str(e)
                 return None
 

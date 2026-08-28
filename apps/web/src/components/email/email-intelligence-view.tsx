@@ -14,7 +14,6 @@ import {
   Code2,
   FileCode,
   Tag,
-  Info,
   Network,
   GitBranch,
   ChevronDown,
@@ -30,12 +29,9 @@ import {
   Download,
   Share2,
   EyeOff,
-  Filter,
-  ArrowUpDown,
   Sparkles,
   Terminal,
   Printer,
-  Copy,
   Check,
 } from "lucide-react";
 import { Card } from "@/components/ui/card";
@@ -76,7 +72,7 @@ interface IdentitySignals {
 }
 interface ReputationSignal { signal_name: string; severity: string; description: string; }
 interface EmailReputation { category?: string; signals?: ReputationSignal[]; impersonation_risk?: string; summary?: string; }
-interface SnapshotDelta { change_type: string; field_name: string; old_value?: any; new_value?: any; description: string; timestamp?: string; }
+interface SnapshotDelta { change_type: string; field_name: string; old_value?: unknown; new_value?: unknown; description: string; timestamp?: string; }
 interface HistoricalComparison { has_previous_scan?: boolean; previous_scan_date?: string; previous_job_id?: string; changes?: SnapshotDelta[]; summary?: string; }
 interface InvestigationScope { depth?: string; estimated_coverage?: string; enabled_providers?: string[]; depth_rationale?: string; }
 interface AIExplanation { summary?: string; key_highlights?: string[]; developer_archetype?: string; uncertainty_notes?: string[]; }
@@ -120,14 +116,18 @@ export default function EmailIntelligenceView({ report }: EmailIntelligenceViewP
   const analysis = raw?.analysis || raw || {};
   const validation = analysis.validation || {};
   const confidence = analysis.confidence || {};
-  const accounts: Account[] = analysis.accounts || analysis.account_discovery || [];
+  const accounts: Account[] = useMemo(
+    () => analysis.accounts || analysis.account_discovery || [],
+    [analysis.accounts, analysis.account_discovery]
+  );
   const footprint = analysis.footprint || analysis.developer_footprint || {};
   const webMentions: WebMention[] = analysis.web_mentions || [];
   const breaches: Breach[] = analysis.breaches || [];
   const breachStatus = analysis.breach_status || "unavailable";
   const usernameCandidates: UsernameCandidate[] = analysis.username_candidates || [];
   const identityClusters: IdentityCluster[] = analysis.identity_clusters || [];
-  const evidenceGraphData: EvidenceGraphData | undefined = analysis.evidence_graph || (footprint as any).evidence_graph;
+  const evidenceGraphData: EvidenceGraphData | undefined =
+    analysis.evidence_graph || (footprint as { evidence_graph?: EvidenceGraphData }).evidence_graph;
   const reputation: EmailReputation = analysis.reputation || {};
   const history: HistoricalComparison = analysis.historical_comparison || {};
   const scope: InvestigationScope = analysis.scope || { depth: "standard" };
@@ -584,7 +584,7 @@ export default function EmailIntelligenceView({ report }: EmailIntelligenceViewP
             </select>
             <select
               value={sortBy}
-              onChange={(e) => setSortBy(e.target.value as any)}
+              onChange={(e) => setSortBy(e.target.value as "confidence" | "platform" | "strongest")}
               className="bg-neutral-900 border border-neutral-700 text-[11px] text-neutral-300 rounded px-2 py-1 outline-none"
             >
               <option value="confidence">Sort by Confidence</option>

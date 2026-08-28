@@ -13,7 +13,6 @@ Production Pipeline with:
 from __future__ import annotations
 
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Callable, Dict, List, Optional
 from loguru import logger
 from sources import SourceCollector
@@ -27,15 +26,9 @@ from .correlation import IdentityCorrelationEngine, UsernameCorrelationEngine
 from .false_positive import FalsePositiveDetector
 from .history import HistoricalSnapshotEngine
 from .models import (
-    AccountFinding,
-    AIExplanation,
     BreachFinding,
     ConfidenceAssessment,
-    DeveloperFootprint,
-    EmailReputationAssessment,
     FindingStatus,
-    HistoricalSnapshotComparison,
-    IdentityFinding,
     IntelligenceReport,
     InvestigationScope,
     ProviderMetric,
@@ -44,7 +37,7 @@ from .models import (
 from .registry import ProviderRegistry, default_registry
 from .reporter import EmailIntelligenceReporter
 from .reputation import EmailReputationEngine
-from .telemetry import default_cache, default_telemetry
+from .telemetry import default_telemetry
 from .validator import EmailValidatorAgent
 
 
@@ -58,17 +51,16 @@ class EmailIntelligenceOrchestrator:
         on_stage_change: Optional[Callable[[str], None]] = None
     ):
         self.validator = EmailValidatorAgent()
-        self.account_discovery = AccountDiscoveryAgent()
         self.developer_footprint = DeveloperFootprintAgent()
-        self.web_mentions = WebMentionAgent()
-        self.breach_exposure = BreachExposureAgent()
         self.username_correlation = UsernameCorrelationEngine()
-        self.identity_resolver = IdentityResolverAgent() if 'IdentityResolverAgent' in globals() else None
         self.reporter = EmailIntelligenceReporter()
         self.on_progress = on_progress
         self.on_stage_change = on_stage_change
 
         self.registry = registry if registry is not None else default_registry
+        self.account_discovery = AccountDiscoveryAgent(registry=self.registry)
+        self.web_mentions = WebMentionAgent()
+        self.breach_exposure = BreachExposureAgent()
         self._uses_default_registry = registry is None
 
     def _set_stage(self, stage: str, pct: int = 0):
@@ -117,9 +109,9 @@ class EmailIntelligenceOrchestrator:
             depth_rationale=depth_rationale
         )
 
-        # ── Stage 1: 12% Validating target ──
+        # ── Stage 1: 10% Validating target ──
         t0 = time.time()
-        self._set_stage("validating_email", 12)
+        self._set_stage("validating_email", 10)
         target = self.validator.validate_email(email_query)
         v_dur = (time.time() - t0) * 1000
         provider_metrics.append(
@@ -134,7 +126,7 @@ class EmailIntelligenceOrchestrator:
                 reasons=[f"Validation Error: {target.validation_error}"]
             )
             report_md = (
-                f"# \u274c Email Intelligence: Validation Failed\n\n"
+                f"# ❌ Email Intelligence: Validation Failed\n\n"
                 f"> **Query**: `{email_query}`  \n"
                 f"> **Reason**: {target.validation_error}\n\n"
                 f"Please provide a valid, well-formed email address (e.g. `developer@domain.com`)."
@@ -153,139 +145,92 @@ class EmailIntelligenceOrchestrator:
         local_part = target.local_part
         domain = target.domain
 
-        # ── Stage 2: 25% Checking developer sources & Parallel Execution ──
+        # ── Stage 2: 25% Checking developer sources & True Concurrency via ProviderRegistry ──
         self._set_stage("checking_developer_sources", 25)
-        account_findings: List[AccountFinding] = []
-        footprint = DeveloperFootprint()
+
+        raw_accs = self.account_discovery.discover_all(email, local_part, domain, depth=clean_depth)
+        if clean_depth == "quick":
+            account_findings = [a for a in raw_accs if a.platform in ("github", "gravatar")]
+        else:
+            account_findings = raw_accs
+
+        # ── Stage 3: 42% Searching public web & Breach Auditing ──
         web_mentions_list: List[WebMention] = []
         breaches_list: List[BreachFinding] = []
         breach_status = "unavailable"
 
-        # Concurrently execute independent providers
-        def _fetch_accounts():
-            t_start = time.time()
-            cached = default_cache.get("accounts", email)
-            if cached:
-                return cached, (time.time() - t_start) * 1000, True
-            accs = self.account_discovery.discover_all(email, local_part, domain)
-            default_cache.set("accounts", email, accs)
-            return accs, (time.time() - t_start) * 1000, False
-
-        def _fetch_web():
-            if clean_depth == "quick":
-                return [], 0.0, False
-            t_start = time.time()
-            cached = default_cache.get("web", email)
-            if cached:
-                return cached, (time.time() - t_start) * 1000, True
-            mentions = self.web_mentions.discover_mentions(email, local_part, domain)
-            default_cache.set("web", email, mentions)
-            return mentions, (time.time() - t_start) * 1000, False
-
-        def _fetch_breaches():
-            if clean_depth == "quick":
-                return ([], "unavailable"), 0.0, False
-            t_start = time.time()
-            cached = default_cache.get("breach", email)
-            if cached:
-                return cached, (time.time() - t_start) * 1000, True
-            b_res = self.breach_exposure.check_exposure(email)
-            default_cache.set("breach", email, b_res)
-            return b_res, (time.time() - t_start) * 1000, False
-
-        with ThreadPoolExecutor(max_workers=4) as executor:
-            fut_accounts = executor.submit(_fetch_accounts)
-            fut_web = executor.submit(_fetch_web)
-            fut_breaches = executor.submit(_fetch_breaches)
-
-            # 42% Searching public web
+        if clean_depth != "quick":
             self._set_stage("searching_public_web", 42)
-
             try:
-                raw_accs, acc_dur, acc_cache = fut_accounts.result(timeout=15.0)
-                if clean_depth == "quick":
-                    account_findings = [a for a in raw_accs if a.platform in ("github", "gravatar")]
-                else:
-                    account_findings = raw_accs
-                provider_metrics.append(
-                    ProviderMetric(provider="account_discovery", duration_ms=round(acc_dur, 2), status="success", cache_hit=acc_cache, records_count=len(account_findings))
-                )
-            except Exception as e:
-                logger.warning(f"[EmailIntelligence] Account discovery error: {e}")
-
-            try:
-                web_mentions_list, web_dur, web_cache = fut_web.result(timeout=15.0)
-                provider_metrics.append(
-                    ProviderMetric(provider="web_search", duration_ms=round(web_dur, 2), status="success", cache_hit=web_cache, records_count=len(web_mentions_list))
-                )
+                web_mentions_list = self.web_mentions.discover_mentions(email, local_part)
             except Exception as e:
                 logger.warning(f"[EmailIntelligence] Web search error: {e}")
+                web_mentions_list = []
 
             try:
-                (breaches_list, breach_status), b_dur, b_cache = fut_breaches.result(timeout=15.0)
-                provider_metrics.append(
-                    ProviderMetric(provider="breach_audit", duration_ms=round(b_dur, 2), status="success", cache_hit=b_cache, records_count=len(breaches_list))
+                breaches_list, breach_status = self.breach_exposure.check_exposure(email)
+            except Exception as e:
+                logger.warning(f"[EmailIntelligence] Breach exposure error: {e}")
+                breaches_list, breach_status = [], "unavailable"
+
+        # Record metrics for enabled providers
+        for p_name in scope.enabled_providers:
+            p_inst = self.registry.get(p_name)
+            dur_ms = getattr(p_inst, "_last_execution_time_ms", 0.0) if p_inst else 0.0
+            stat_val = "success" if (p_inst and p_inst.is_available()) else "unavailable"
+            provider_metrics.append(
+                ProviderMetric(
+                    provider=p_name,
+                    duration_ms=round(dur_ms or 0.0, 2),
+                    status=stat_val,
+                    records_count=len(account_findings) if p_name == "github" else 0
                 )
-            except Exception as e:
-                logger.warning(f"[EmailIntelligence] Breach audit error: {e}")
+            )
 
-        # Ingest custom plugin providers from registry if any custom registered
-        standard_provider_names = {"github", "gravatar", "npm", "gitlab", "pypi", "crates", "web_search", "web", "breach", "hibp"}
-        custom_providers = [name for name in self.registry.list_providers() if name not in standard_provider_names]
-
-        if custom_providers and clean_depth != "quick":
-            try:
-                custom_results = self.registry.execute_all(target=target, provider_names=custom_providers, concurrent=True)
-                for p_name, p_res in custom_results.items():
-                    for ev in p_res.evidence_items:
-                        source_collector.add_source(
-                            title=ev.title,
-                            url=ev.url,
-                            platform=ev.provider,
-                            source_type=ev.source_type,
-                            snippet=ev.snippet,
-                            metadata=ev.raw_data or ev.metadata
-                        )
-                    for f in p_res.findings:
-                        if isinstance(f, AccountFinding):
-                            account_findings.append(f)
-            except Exception as e:
-                logger.warning(f"[EmailIntelligence] Custom provider execution error: {e}")
-
-        # Ingest Sources into Collector
-
+        # ── Ingest Sources into Collector with Canonical Identity ──
         for acc in account_findings:
             for ev in acc.evidence:
-                source_collector.add_source(
+                src = source_collector.add_source(
                     title=ev.title,
                     url=ev.url,
                     platform=ev.provider,
                     source_type=ev.source_type,
                     snippet=ev.snippet,
-                    metadata=ev.raw_data or ev.metadata
+                    metadata=ev.raw_data or ev.metadata,
+                    source_id=ev.evidence_id
                 )
+                ev.evidence_id = src["source_id"]
+            acc.evidence_ids = [e.evidence_id for e in acc.evidence]
 
         for m in web_mentions_list:
-            source_collector.add_source(
+            m_ev_id = m.source_id or f"web_{m.domain}"
+            src = source_collector.add_source(
                 title=m.title,
                 url=m.canonical_url or m.url,
                 platform="web",
                 source_type=m.mention_category.value,
                 snippet=m.snippet,
-                metadata={"domain": m.domain, "is_exact_match": m.is_exact_match}
+                metadata={"domain": m.domain, "is_exact_match": m.is_exact_match},
+                source_id=m_ev_id
             )
+            m.source_id = src["source_id"]
+            m.evidence_ids = [src["source_id"]]
 
-        if breaches_list:
-            source_collector.add_source(
-                title="HaveIBeenPwned Security Disclosures",
-                url="https://haveibeenpwned.com",
+        for b in breaches_list:
+            b_ev_id = b.evidence_ids[0] if b.evidence_ids else f"hibp_{b.domain or b.breach_name.lower().replace(' ', '_')}"
+            safe_url = f"https://haveibeenpwned.com/PwnedWebsites#{b.breach_name.replace(' ', '')}" if b.breach_name else "https://haveibeenpwned.com"
+            src = source_collector.add_source(
+                title=f"Breach Disclosure: {b.breach_name}",
+                url=safe_url,
                 platform="hibp",
                 source_type="security_audit",
-                snippet=f"Email verified in {len(breaches_list)} public breach disclosures."
+                snippet=b.description or f"Public security incident: {b.breach_name}",
+                source_id=b_ev_id
             )
+            b.evidence_ids = [src["source_id"]]
 
-        # ── Stage 3: 61% Processing account findings & False Positive Calibration ──
-        self._set_stage("processing_account_findings", 61)
+        # ── Stage 3: 58% Processing account findings & False Positive Calibration ──
+        self._set_stage("processing_account_findings", 58)
         account_findings, contradictions = FalsePositiveDetector.filter_and_calibrate(
             accounts=account_findings,
             target_email=email,
